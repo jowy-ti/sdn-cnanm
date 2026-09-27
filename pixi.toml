@@ -1,0 +1,16 @@
+[workspace]
+authors = ["Joel Gonzalez Jimenez <joel.gonzalez.jimenez@estudiantat.upc.edu>"]
+channels = ["conda-forge"]
+name = "sdn-cnanm"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+pyright = "*"
+ruff = "*"
+
+[pypi-dependencies]
+jons-mcp-pyright = "*"
+mininet = "*"

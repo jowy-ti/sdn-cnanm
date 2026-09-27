@@ -1,0 +1,12 @@
+# Stack
+
+pyroute2
+os-ken/Ryu
+
+// Global packages
+mininet 
+openvswitch-testcontroller
+
+## INIT STEPS
+
+sudo systemctl start openvswitch

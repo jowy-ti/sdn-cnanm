@@ -1,0 +1,6 @@
+from collections.abc import Iterable
+
+from .node import Node
+
+def dumpNodeConnections(nodes: Iterable[Node]) -> None: ...
+def dumpPorts(switches: Iterable[Node]) -> None: ...

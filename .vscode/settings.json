@@ -1,0 +1,8 @@
+{
+  "python.languageServer": "Pylance",
+  "python.analysis.typeCheckingMode": "strict",
+  "python.analysis.stubPath": "typings",
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.inlayHints.variableTypes": true,
+  "python.analysis.inlayHints.functionReturnTypes": true
+}
