@@ -14,3 +14,31 @@ ruff = "*"
 [pypi-dependencies]
 jons-mcp-pyright = "*"
 mininet = "*"
+
+[feature.controller.dependencies]
+# Ryu 4.34 pairs with eventlet 0.30.2 (the last release with
+# wsgi.ALREADY_HANDLED), and that eventlet crashes on Python >= 3.10
+# (socket.timeout became the immutable TimeoutError there).
+python = "3.9.*"
+
+[feature.controller.pypi-dependencies]
+ryu = "==4.34"
+# ryu/app/wsgi.py imports eventlet.wsgi.ALREADY_HANDLED, removed in 0.31.
+eventlet = "==0.30.2"
+
+[feature.controller.pypi-options]
+# Ryu 4.34's sdist cannot be built with setuptools >= 68 (its setup hook
+# uses the removed easy_install.get_script_args), so install a prebuilt
+# wheel instead: vendor/ryu-4.34-py3-none-any.whl.  The index-url must be
+# restated: a feature-level pypi-options table replaces the default one.
+index-url = "https://pypi.org/simple"
+find-links = [{ path = "vendor" }]
+
+[feature.controller.tasks]
+srv6-controller = "ryu-manager controller/srv6_app.py"
+
+[environments]
+# The controller only needs the Ryu app: drop the default feature (pyright,
+# ruff, mininet, jons-mcp-pyright) to avoid dependency clashes with the
+# ryu/eventlet pairing (dnspython <2 vs >=2).
+controller = { features = ["controller"], no-default-feature = true }

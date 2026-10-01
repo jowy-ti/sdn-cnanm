@@ -9,6 +9,7 @@ class Mininet:
     hosts: list[Host]
     switches: list[Switch]
     controllers: list[Controller]
+    links: list[Link]
     def __init__(
         self,
         topo: Topo | None = None,
@@ -31,6 +32,9 @@ class Mininet:
     def start(self) -> None: ...
     def stop(self) -> None: ...
     def pingAll(self, timeout: float | None = None) -> float | Literal[0]: ...
+    def ping(
+        self, hosts: Sequence[Host] | None = None, timeout: str | None = None
+    ) -> float | None: ...
     def iperf(
         self,
         hosts: Sequence[Host] | None = None,

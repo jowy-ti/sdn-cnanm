@@ -2,5 +2,6 @@
   "typeCheckingMode": "strict",
   "stubPath": "typings",
   "include": ["."],
-  "exclude": [".pixi"]
+  "exclude": [".pixi"],
+  "reportMissingModuleSource": "none"
 }

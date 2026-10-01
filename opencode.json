@@ -17,13 +17,11 @@
       "command": [
         "pixi",
         "run",
-        "jons-mcp-pyright",
+        "python",
+        "/home/joelgonzalez/Documents/sdn-cnanm/scripts/run_jons_mcp_pyright.py",
         "/home/joelgonzalez/Documents/sdn-cnanm"
       ],
       "enabled": true
     }
-  },
-  "permission": {
-    "lsp": "allow"
   }
 }
