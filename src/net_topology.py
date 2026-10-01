@@ -1,10 +1,13 @@
 """Mininet test topology: h1 - n1 - n2 - n3 - h2.
 
-Usage: sudo python3 net_topology.py [openflow|linux]
+Usage: sudo python3 net_topology.py [openflow|linux|srv6]
 
 - openflow: three chained OVS switches, hosts on one subnet.
 - linux:    three chained routers, one /24 subnet per host plus
             static routes so the two hosts can reach each other.
+- srv6:     same routers without static routes; src/routing.py discovers
+            the underlay neighbours with NDP and installs the SRv6
+            policies computed by the Ryu app (controller/srv6_app.py).
 """
 
 import sys
@@ -17,6 +20,8 @@ from mininet.node import DefaultController, Node, OVSSwitch, Switch
 from mininet.topo import Topo
 from mininet.util import dumpNodeConnections
 
+import routing
+
 HOST_LINK: dict[str, Any] = {
     "bw": 10,
     "delay": "5ms",
@@ -24,15 +29,6 @@ HOST_LINK: dict[str, Any] = {
     "max_queue_size": 1000,
     "use_htb": True,
 }
-
-# Subnets: hosts live in 10.0.1.0/24 (h1) and 10.0.2.0/24 (h2); the
-# router links are 192.168.1.0/24 (n1-n2) and 192.168.2.0/24 (n2-n3).
-# ROUTES = {
-#     "n1": ["10.0.2.0/24 via 192.168.1.2"],
-#     "n2": ["10.0.1.0/24 via 192.168.1.1", "10.0.2.0/24 via 192.168.2.2"],
-#     "n3": ["10.0.1.0/24 via 192.168.2.1"],
-# }
-
 
 class LinuxRouter(Node):
     """A Node with IP forwarding enabled."""
@@ -105,20 +101,25 @@ def build(mode: str) -> None:
     )
     net.start()
 
-    # if is_router:
-    #     for name, routes in ROUTES.items():
-    #         router = net.get(name)
-    #         for route in routes:
-    #             router.cmd(f"ip route add {route}")
+    if mode == "srv6":
+        routing.setup(net)
 
     print("*** Dumping host connections")
     dumpNodeConnections(net.hosts)
 
-    print("*** Testing network connectivity")
-    net.pingAll()
+    h1, h2 = net.get("h1", "h2")
+
+    if mode == "srv6":
+        # The middle routers deliberately have no IPv4 route toward the
+        # host subnets (SRv6 carries the traffic), so only the two hosts
+        # are pinged.
+        print("*** Testing network connectivity between hosts")
+        net.ping(hosts=[h1, h2])
+    else:
+        print("*** Testing network connectivity")
+        net.pingAll()
 
     print("*** Testing bandwidth between h1 and h2")
-    h1, h2 = net.get("h1", "h2")
     net.iperf((h1, h2))
 
     net.stop()
