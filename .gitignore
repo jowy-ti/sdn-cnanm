@@ -8,4 +8,3 @@ __pycache__/
 
 # Tool caches
 .ruff_cache/
-vendor/

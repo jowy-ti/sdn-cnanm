@@ -1,130 +1,98 @@
-"""Mininet test topology: h1 - n1 - n2 - n3 - h2.
+"""SRv6 lab: h1 - r1 - r2 - r3 - h2, with a dynamic OSPFv3 (FRR) underlay.
 
-Usage: sudo python3 net_topology.py [openflow|linux|srv6]
+Every router runs the ipmininet default BasicRouterConfig (zebra + OSPF +
+OSPFv3). r1 (ingress) and r3 (egress) hold all the SRv6 logic: each one
+encapsulates traffic toward the peer's loopback SID and terminates the
+peer's policy with an End.DX6 endpoint toward its local host. The segment
+list carries a single segment, so r2 never processes SRH and only forwards
+the outer packet along the path computed dynamically by the IGP.
 
-- openflow: three chained OVS switches, hosts on one subnet.
-- linux:    three chained routers, one /24 subnet per host plus
-            static routes so the two hosts can reach each other.
-- srv6:     same routers without static routes; src/routing.py discovers
-            the underlay neighbours with NDP and installs the SRv6
-            policies computed by the Ryu app (controller/srv6_app.py).
+Run as root:  pixi run net
 """
 
-import sys
-from typing import Any
+import os
 
-from mininet.link import TCLink
-from mininet.log import setLogLevel
-from mininet.net import Mininet
-from mininet.node import DefaultController, Node, OVSSwitch, Switch
-from mininet.topo import Topo
-from mininet.util import dumpNodeConnections
+from ipmininet.cli import IPCLI
+from ipmininet.ipnet import IPNet
+from ipmininet.iptopo import IPTopo
+from ipmininet.router.config import OSPF6
+from ipmininet.srv6 import LocalSIDTable, SRv6Encap, SRv6EndDX6Function
+from mako.lookup import TemplateLookup
 
-import routing
+# On Fedora the FRR/RADVVD/SSHD daemons ipmininet starts live outside the
+# default PATH.
+for _dir in ("/usr/libexec/frr", "/usr/sbin", "/usr/local/sbin"):
+    if os.path.isdir(_dir) and _dir not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = _dir + os.pathsep + os.environ["PATH"]
 
-HOST_LINK: dict[str, Any] = {
-    "bw": 10,
-    "delay": "5ms",
-    "loss": 0,
-    "max_queue_size": 1000,
-    "use_htb": True,
-}
+os.environ.setdefault("NO_COLOR", "1")
 
-class LinuxRouter(Node):
-    """A Node with IP forwarding enabled."""
+SID_R1 = "2001:db8:1::10"
+SID_R3 = "2001:db8:3::10"
 
-    def config(
-        self,
-        mac: str | None = None,
-        ip: str | None = None,
-        defaultRoute: str | None = None,
-        lo: str = "up",
-        **params: Any,
-    ) -> dict[str, Any]:
-        result = super().config(
-            mac=mac, ip=ip, defaultRoute=defaultRoute, lo=lo, **params
+OSPF6_TEMPLATES = TemplateLookup(
+    directories=[os.path.join(os.path.dirname(__file__), "templates")]
+)
+
+
+class SRv6MetricTopo(IPTopo):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        self.sid_tables: dict[str, LocalSIDTable] = {}
+        super().__init__(*args, **kwargs)
+
+    def build(self, *args: object, **kwargs: object) -> None:
+        r1 = self.addRouter("r1", lo_addresses=["2001:db8:1::1/64"])
+        r2 = self.addRouter("r2", lo_addresses=["2001:db8:2::1/64"])
+        r3 = self.addRouter("r3", lo_addresses=["2001:db8:3::1/64"])
+        for r in (r1, r2, r3):
+            self.addDaemon(r, OSPF6, template_lookup=OSPF6_TEMPLATES)
+        h1 = self.addHost("h1")
+        h2 = self.addHost("h2")
+
+        self.addLink(h1, r1)
+        self.addLink(r1, r2)
+        self.addLink(r2, r3)
+        self.addLink(r3, h2)
+
+        super().build(*args, **kwargs)
+
+    def post_build(self, net: IPNet) -> None:
+        SRv6Encap(
+            net=net,
+            node="r1",
+            to="h2",
+            through=[SID_R3],
+            mode=SRv6Encap.ENCAP,
         )
-        self.cmd("sysctl net.ipv4.ip_forward=1")
-        return result
+        SRv6Encap(
+            net=net,
+            node="r3",
+            to="h1",
+            through=[SID_R1],
+            mode=SRv6Encap.ENCAP,
+        )
 
+        for node, sid, dest in (("r1", SID_R1, "h1"), ("r3", SID_R3, "h2")):
+            self.sid_tables[node] = LocalSIDTable(
+                net[node],
+                matching=[next(net[node].intf("lo").ip6s()).network],
+            )
+            SRv6EndDX6Function(
+                net=net,
+                node=node,
+                to=sid + "/128",
+                nexthop=net[dest],
+                table=self.sid_tables[node],
+            )
+        super().post_build(net)
 
-class Topology(Topo):
-    def build(self, node_cls: type[Node] = OVSSwitch) -> None:
-        is_router = not issubclass(node_cls, Switch)
-
-        for n in range(1, 4):
-            if is_router:
-                # ip=None keeps mininet from overwriting the link address.
-                self.addNode(f"n{n}", cls=node_cls, ip=None)
-            else:
-                self.addSwitch(f"n{n}", cls=node_cls)
-
-        # One host on each edge node (n1 and n3).
-        for k, node in enumerate(("n1", "n3"), start=1):
-            host = f"h{k}"
-            if is_router:
-                gateway = f"10.0.{k}.1"
-                self.addHost(
-                    host,
-                    ip=f"10.0.{k}.11/24",
-                    defaultRoute=f"via {gateway}",
-                )
-                self.addLink(host, node, **HOST_LINK, params2={"ip": f"{gateway}/24"})
-            else:
-                self.addHost(host)
-                self.addLink(host, node, **HOST_LINK)
-
-        # Chain the three nodes.
-        for n in (1, 2):
-            left, right = f"n{n}", f"n{n + 1}"
-            if is_router:
-                self.addLink(
-                    left,
-                    right,
-                    params1={"ip": f"192.168.{n}.1/24"},
-                    params2={"ip": f"192.168.{n}.2/24"},
-                )
-            else:
-                self.addLink(left, right)
-
-
-def build(mode: str) -> None:
-    """Create the network and run connectivity/bandwidth tests."""
-    is_router = mode != "openflow"
-    node_cls: type[Node] = LinuxRouter if is_router else OVSSwitch
-
-    net = Mininet(
-        topo=Topology(node_cls),
-        link=TCLink,
-        waitConnected=True,
-        controller=None if is_router else DefaultController,
-    )
-    net.start()
-
-    if mode == "srv6":
-        routing.setup(net)
-
-    print("*** Dumping host connections")
-    dumpNodeConnections(net.hosts)
-
-    h1, h2 = net.get("h1", "h2")
-
-    if mode == "srv6":
-        # The middle routers deliberately have no IPv4 route toward the
-        # host subnets (SRv6 carries the traffic), so only the two hosts
-        # are pinged.
-        print("*** Testing network connectivity between hosts")
-        net.ping(hosts=[h1, h2])
-    else:
-        print("*** Testing network connectivity")
-        net.pingAll()
-
-    print("*** Testing bandwidth between h1 and h2")
-    net.iperf((h1, h2))
-
-    net.stop()
+    def clean(self) -> None:
+        for table in self.sid_tables.values():
+            table.clean()
 
 
 if __name__ == "__main__":
-    setLogLevel("info")
-    build(sys.argv[1] if len(sys.argv) > 1 else "openflow")
+    net = IPNet(topo=SRv6MetricTopo())
+    net.start()
+    IPCLI(net)
+    net.stop()

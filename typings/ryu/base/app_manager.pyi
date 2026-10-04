@@ -1,9 +1,0 @@
-import logging
-from typing import Any, ClassVar
-
-class RyuApp:
-    _CONTEXTS: ClassVar[dict[str, type]]
-    logger: logging.Logger
-    def __init__(self, *args: Any, **kwargs: Any) -> None: ...
-    def start(self) -> Any: ...
-    def stop(self) -> None: ...

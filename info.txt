@@ -1,12 +1,12 @@
-# Stack
-
-pyroute2
-os-ken/Ryu
-
 // Global packages
 mininet 
 openvswitch-testcontroller
+frr
 
 ## INIT STEPS
 
 sudo systemctl start openvswitch
+sudo systemctl stop frr
+sudo usermod -aG frrvty root
+
+joelgonzalez ALL=(ALL) NOPASSWD: /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology.py

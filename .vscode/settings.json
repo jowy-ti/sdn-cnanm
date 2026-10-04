@@ -4,5 +4,7 @@
   "python.analysis.stubPath": "typings",
   "python.analysis.autoImportCompletions": true,
   "python.analysis.inlayHints.variableTypes": true,
-  "python.analysis.inlayHints.functionReturnTypes": true
+  "python.analysis.inlayHints.functionReturnTypes": true,
+  "python-envs.defaultEnvManager": "renan-r-santos.pixi-code:pixi",
+  "python-envs.defaultPackageManager": "renan-r-santos.pixi-code:pixi"
 }
