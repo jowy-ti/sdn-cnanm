@@ -83,12 +83,12 @@ class SRv6MetricTopo(IPTopo):
                 to=sid + "/128",
                 nexthop=net[dest],
                 table=self.sid_tables[node],
-            )
+            )   
         super().post_build(net)
 
-    def clean(self) -> None:
-        for table in self.sid_tables.values():
-            table.clean()
+    # def clean(self) -> None:
+    #     for table in self.sid_tables.values():
+    #         table.clean()
 
 
 if __name__ == "__main__":

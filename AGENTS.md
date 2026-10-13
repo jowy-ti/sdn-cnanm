@@ -2,9 +2,11 @@
 
 ## Project
 
-SDN/CNANM lab — an ipmininet (Mininet extension) SRv6 emulation, single entrypoint: `src/net_topology.py`. No tests, no CI, no build step.
+SDN/CNANM lab — an ipmininet (Mininet extension) emulation with two entrypoints: `src/net_topology.py` (SRv6) and `src/net_topology_mpls.py` (the MPLS counterpart, same chain, for comparing the two data planes). No tests, no CI, no build step.
 
 The topology is the chain `h1 - r1 - r2 - r3 - h2`. OSPFv3 (FRR) is the underlay IGP — chosen over IS-IS because ipmininet has no IS-IS support — so every router keeps the ipmininet default `BasicRouterConfig` (zebra + ospfd + ospf6d) and learns the whole topology; r2 stays a pure underlay forwarder and never processes an SRH. r1 (ingress) and r3 (egress) hold all the SRv6 logic: loopback locators `2001:db8:{1,2,3}::1/64` carry the SIDs, `post_build()` installs one `SRv6Encap` route per direction (h1→h2 via `2001:db8:3::10`, h2→h1 via `2001:db8:1::10`) plus a `LocalSIDTable` + `SRv6EndDX6Function` endpoint on each router toward its local host. Installing an SRv6 route also enables SRH parsing on every node (`enable_srv6`).
+
+`src/net_topology_mpls.py` is the MPLS counterpart: the same chain and the same dynamic underlay, but IPv4-only (`use_v6=False` on every node, so the default config runs zebra + ospfd/OSPFv2 and never spawns ospf6d, which is why it needs no template patch) and a **static** MPLS LSP provisioned through the kernel data plane (`mpls_router` + `mpls_iptunnel`, `net.mpls.platform_labels` and `net.mpls.conf.<itf>.input` per namespace). r1 is the ingress LER and pushes label 100 for h2, r2 is a transit LSR that swaps 100→200, r3 is the egress LER that pops and delivers; the reverse LSP uses 300/400. Unlike SRv6, the transit router holds per-FEC label state. FRR 10 ships no `ldpd`, so labels are configured statically rather than distributed by LDP.
 
 ## Commands
 
@@ -15,7 +17,8 @@ pixi run pyright          # typecheck, strict — must be 0 errors
 pixi run ruff check .     # lint (always pass `.` — see ruff.toml)
 pixi run ruff format .    # format
 pixi install              # after editing pixi.toml
-pixi run net              # run the topology (passwordless sudo; drops into the Mininet CLI)
+pixi run net              # run the SRv6 topology (passwordless sudo; drops into the Mininet CLI)
+pixi run net-mpls         # run the MPLS topology (needs its own NOPASSWD sudoers line — see Runtime gotchas)
 ```
 
 Verify with `ruff check .` then `pyright`. No test suite exists.
@@ -40,13 +43,14 @@ Verify with `ruff check .` then `pyright`. No test suite exists.
 
 ## Runtime gotchas (see also `info.txt`)
 
-- Running the topology needs root: `pixi run net` runs `sudo /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology.py` (absolute paths, no `-E`: a matching `NOPASSWD` line in `/etc/sudoers.d/net_topology` lets it run passwordless; `-E` would require a `SETENV` sudoers tag).
+- Running the topology needs root: `pixi run net` runs `sudo /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology.py` (absolute paths, no `-E`: a matching `NOPASSWD` line in `/etc/sudoers.d/net_topology` lets it run passwordless; `-E` would require a `SETENV` sudoers tag). `pixi run net-mpls` is the same for `src/net_topology_mpls.py`, but the existing `NOPASSWD` rule only whitelists the SRv6 script — add a second line for the MPLS one (needs root to edit `/etc/sudoers.d/`), or run it with a password.
 - FRR must be installed system-wide (`sudo dnf install frr`). Fedora puts the daemons in `/usr/libexec/frr`, which is not on PATH; `src/net_topology.py` prepends it (plus `/usr/sbin`) at import time — ipmininet does `require_cmd("zebra"/"ospfd"/"ospf6d")` on PATH and fails at `net.start()` otherwise. Run `sudo systemctl stop frr` if the system FRR service is running (the topology starts its own instances).
 - One-time host setup: `sudo usermod -aG frrvty root`. ipmininet validates daemon configs with `-Cf ... -u root` and FRR 10 aborts with `user(root) is not part of vty group specified(frrvty)` when root is not in that group (Fedora's `frrvty` group only contains `frr`), killing every router at `net.start()`.
 - ipmininet's stock `templates/ospf6d.mako` assigns areas with the Quagga-era `interface X area Y` line under `router ospf6`, which FRR 10 rejects as `Unknown command`: interfaces never join an area, so OSPFv3 forms no adjacencies and SRv6 outer packets are unroutable. The repo ships a fixed copy in `src/templates/ospf6d.mako` (`ipv6 ospf6 area` inside each interface stanza), wired in `SRv6MetricTopo.build()` via `addDaemon(..., OSPF6, template_lookup=OSPF6_TEMPLATES)` (ipmininet keeps the first daemon registered per name). Rebase that file if the wheel is ever rebuilt from newer ipmininet.
 - iproute2 6.17 colorizes `ip addr` when stdout is a tty, and Mininet shells are ptys, which breaks ipmininet's address parser (`AddressValueError: Only decimal digits permitted in '\x1b[1;35m127'...`). The script sets `NO_COLOR=1` at import time — do not drop that line.
 - The current topology uses no OVS switches, so `openvswitch` is not required (older topologies did; `sudo systemctl start openvswitch`).
 - SRv6 needs kernel `seg6` support (`net.ipv6.conf.*.seg6_enabled`, already available on this machine); ipmininet sets the sysctls when an SRv6 route is installed.
+- MPLS (the `src/net_topology_mpls.py` variant) needs the kernel `mpls_router` and `mpls_iptunnel` modules. The script `modprobe`s them (idempotent, needs root) in `post_build()` and then sets `net.mpls.platform_labels` and `net.mpls.conf.<itf>.input` inside each router namespace. FRR 10 ships no `ldpd`, so the LSP is configured statically with `ip route ... encap mpls` (push) and `ip -f mpls route` (swap/pop).
 - Interactive: `__main__` drops into `IPCLI(net)` (Mininet's `Mininet` class has no `.cli()` method); exit it to stop the network.
 
 ## OpenCode
