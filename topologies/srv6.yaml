@@ -1,0 +1,54 @@
+# Declarative description of the SRv6 lab consumed by src/net_topology_yaml.py.
+#
+# It reproduces the hard-coded topology of src/net_topology.py:
+#
+#     h1 - r1 - r2 - r3 - h2
+#
+# Every router runs the ipmininet default config plus OSPFv3 (FRR), which makes
+# the underlay dynamic.  Only the edge routers carry SRv6 state:
+#   * r1 is the ingress for h1 -> h2: it encapsulates toward r3's locator SID.
+#   * r3 is the ingress for h2 -> h1: it encapsulates toward r1's locator SID.
+#   * each edge router owns a locator SID and terminates the peer's policy with
+#     an End.DX6 function that delivers the inner packet to its local host.
+#   * r2 is a plain underlay forwarder and never sees an SRH.
+#
+# Schema (see the module docstring of src/net_topology_yaml.py for details):
+#
+#   hosts:    [ {name, use_v6?} ]
+#   routers:  [ {name, use_v6?, loopback?, ospf6?, sids?: [{address, to, cost?}]} ]
+#   links:    [ [a, b] | {nodes: [a, b], options?: {...}} ]
+#   policies: [ {node, to, through: [...], mode?, cost?} ]
+
+hosts:
+  - name: h1
+  - name: h2
+
+routers:
+  - name: r1
+    loopback: 2001:db8:1::1/64
+    sids:
+      - address: 2001:db8:1::10
+        to: h1
+  - name: r2
+    loopback: 2001:db8:2::1/64
+  - name: r3
+    loopback: 2001:db8:3::1/64
+    sids:
+      - address: 2001:db8:3::10
+        to: h2
+
+links:
+  - [h1, r1]
+  - [r1, r2]
+  - [r2, r3]
+  - [r3, h2]
+
+policies:
+  - node: r1
+    to: h2
+    through: [2001:db8:3::10]
+    mode: encap
+  - node: r3
+    to: h1
+    through: [2001:db8:1::10]
+    mode: encap

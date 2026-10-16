@@ -15,6 +15,9 @@ jons-mcp-pyright = "*"
 # PyPI; keep it explicit here.
 mininet = "*"
 ipmininet = "==1.1"
+# src/net_topology_yaml.py reads its topology from a YAML file; declare the
+# parser explicitly instead of relying on the transitive copy.
+pyyaml = "*"
 
 [pypi-options]
 # ipmininet is not on PyPI in a buildable form (1.0's sdist needs
@@ -26,3 +29,8 @@ find-links = [{ path = "vendor" }]
 [tasks]
 # The topology needs root (Mininet namespaces, OVS, FRR daemons).
 net = "sudo /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology.py"
+# Same lab, but the topology comes from topologies/srv6.yaml. Needs its own
+# passwordless sudoers entry (the existing rule only whitelists net_topology.py).
+net-yaml = "sudo /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology_yaml.py"
+# Parse/validate the YAML topology without root or a running network.
+check-yaml = "python /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology_yaml.py --check"

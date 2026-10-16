@@ -1,6 +1,5 @@
 // Global packages
-mininet 
-openvswitch-testcontroller
+mininet
 frr
 
 ## INIT STEPS
