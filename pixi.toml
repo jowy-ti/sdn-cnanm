@@ -26,6 +26,3 @@ find-links = [{ path = "vendor" }]
 [tasks]
 # The topology needs root (Mininet namespaces, OVS, FRR daemons).
 net = "sudo /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology.py"
-# Same, for the MPLS counterpart. Needs its own passwordless sudoers entry:
-# the existing rule only whitelists src/net_topology.py.
-net-mpls = "sudo /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology_mpls.py"
