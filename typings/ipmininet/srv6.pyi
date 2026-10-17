@@ -26,6 +26,33 @@ class SRv6Encap:
     ) -> None: ...
 
 
+class SRv6EndFunction:
+    ACTION: str
+
+    def __init__(
+        self,
+        net: IPNet,
+        node: str,
+        to: str = ...,
+        cost: int = ...,
+        table: LocalSIDTable | None = ...,
+    ) -> None: ...
+
+
+class SRv6EndXFunction:
+    ACTION: str
+
+    def __init__(
+        self,
+        net: IPNet,
+        node: str,
+        to: str = ...,
+        nexthop: Any = ...,
+        cost: int = ...,
+        table: LocalSIDTable | None = ...,
+    ) -> None: ...
+
+
 class SRv6EndDX6Function:
     def __init__(
         self,

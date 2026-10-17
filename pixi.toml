@@ -27,10 +27,12 @@ index-url = "https://pypi.org/simple"
 find-links = [{ path = "vendor" }]
 
 [tasks]
-# The topology needs root (Mininet namespaces, OVS, FRR daemons).
-net = "sudo /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology.py"
-# Same lab, but the topology comes from topologies/srv6.yaml. Needs its own
-# passwordless sudoers entry (the existing rule only whitelists net_topology.py).
+# Run the SRv6 lab; the topology comes from topologies/srv6.yaml. Needs a
+# passwordless sudoers entry for this exact argv (see RUNBOOK.md).
 net-yaml = "sudo /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology_yaml.py"
 # Parse/validate the YAML topology without root or a running network.
 check-yaml = "python /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology_yaml.py --check"
+# Clean up leftovers (namespaces, links, daemons, /tmp logs) after a crash or
+# Ctrl-C. Runs Mininet's `mn -c` plus ipmininet's daemon kill patterns. Needs
+# root; add a passwordless sudoers entry for this exact argv to avoid a prompt.
+clean = "sudo /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python -m ipmininet.clean"

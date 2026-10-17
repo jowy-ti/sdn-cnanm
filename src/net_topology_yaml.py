@@ -1,21 +1,38 @@
 """SRv6 lab whose topology is read from a YAML file.
 
-Functional twin of ``src/net_topology.py`` -- the chain ``h1 - r1 - r2 - r3 -
-h2`` with a dynamic OSPFv3 (FRR) underlay and SRv6 as the data plane -- but the
-nodes, links, locator SIDs and encapsulation policies are not hard-coded: they
-are described by a YAML file, by default ``topologies/srv6.yaml``.
+An SRv6 lab (dynamic OSPFv3/FRR underlay, SRv6 data plane) whose nodes, links,
+locator SIDs and encapsulation policies are not hard-coded: they are described
+by a YAML file, by default ``topologies/srv6.yaml``.  The bundled lab chains
+``h1 - r1 - r2 - r3 - r4 - r5 - r6 - h2`` with an ``r2 - r5`` shortcut and uses
+a segment list to force traffic through the transit router ``r4``.
 
 Everything ipmininet needs is derived from that file:
 
 * every router gets the default ``BasicRouterConfig`` (zebra + ospfd + ospf6d)
-  and therefore learns the whole topology; ``r2`` stays a pure underlay
-  forwarder and never processes an SRH;
+  and therefore learns the whole topology; a router without any local SID stays
+  a pure underlay forwarder and never processes an SRH;
 * each router ``loopback`` is the prefix that carries its locator SIDs;
-* every entry in a router's ``sids`` list installs an ``End.DX6`` endpoint
-  (the SID decapsulates and delivers to the named node's local link) into a
-  per-router ``LocalSIDTable`` matching the loopback prefix;
+* every entry in a router's ``sids`` list installs one local SID endpoint into
+  a per-router ``LocalSIDTable`` matching the loopback prefix.  The endpoint
+  ``behavior`` selects what happens once a packet reaches the SID:
+
+  - ``end.dx6`` (default): decapsulate and deliver to the ``to`` node's local
+    IPv6 address;
+  - ``end``: a pure transit waypoint -- the router pops its own SID and
+    forwards toward the next segment.  This is what lets a segment list force
+    a path through an SRv6 router in the middle of the network;
+  - ``end.x``: like ``end`` but with an explicit L3 cross-connect, sending the
+    packet to the ``to`` node's IPv6 address.
+
+  A transit router therefore carries one or more ``behavior: end`` SIDs inside
+  its locator and is listed as an intermediate hop (its SID first) in a
+  ``policies`` segment list.  It keeps running the plain OSPFv3 underlay: the
+  IGP routes the outer packet to the locator and the SID advances the SRH;
 * every entry in ``policies`` installs one ``SRv6Encap`` route on the named
-  ingress router, steering the destination toward the given segment list.
+  ingress router, steering the destination toward the given segment list.  The
+  segment list is what enforces the path: listing a transit router's SID before
+  the egress SID makes the packet traverse that router even when it is not on
+  the IGP shortest path.
 
 Schema
 ------
@@ -24,17 +41,22 @@ Schema
 ``routers``
     List of ``{name, use_v6?, loopback?, ospf6?, sids?}`` mappings.
     ``loopback`` is a CIDR (e.g. ``2001:db8:1::1/64``); it is mandatory when
-    ``sids`` is non-empty.  ``ospf6`` (default ``true``) toggles the OSPFv3
-    daemon.  ``sids`` is a list of ``{address, to, cost?}`` where ``address``
-    is the locator SID (``/128`` assumed) and ``to`` is the node reached after
-    decapsulation.
+    ``sids`` is non-empty and every SID must fall inside it.  ``ospf6``
+    (default ``true``) toggles the OSPFv3 daemon.  ``sids`` is a list of
+    ``{address, behavior?, to?, cost?}`` where ``address`` is the locator SID
+    (``/128`` assumed) and ``behavior`` is one of:
+
+    * ``end.dx6`` (default) -- deliver the decapsulated packet to ``to``;
+    * ``end`` -- transit waypoint, no ``to`` (pops the SID, keeps forwarding);
+    * ``end.x`` -- transit waypoint cross-connected to ``to``.
 ``links``
     List of ``[node_a, node_b]`` pairs, or ``{nodes: [a, b], options: {...}}``
     where ``options`` is forwarded verbatim to ``IPTopo.addLink``.
 ``policies``
     List of ``{node, to, through, mode?, cost?}``.  ``node`` is the ingress
-    router, ``to`` a destination node, ``through`` the segment list, ``mode``
-    either ``encap`` (default) or ``inline``.
+    router, ``to`` a destination node, ``through`` the segment list (list any
+    transit SRv6 router SIDs before the egress SID), ``mode`` either ``encap``
+    (default) or ``inline``.
 
 Run as root:  pixi run net-yaml
 or with an explicit file:
@@ -58,7 +80,13 @@ from ipmininet.cli import IPCLI
 from ipmininet.ipnet import IPNet
 from ipmininet.iptopo import IPTopo
 from ipmininet.router.config import OSPF6
-from ipmininet.srv6 import LocalSIDTable, SRv6Encap, SRv6EndDX6Function
+from ipmininet.srv6 import (
+    LocalSIDTable,
+    SRv6Encap,
+    SRv6EndDX6Function,
+    SRv6EndFunction,
+    SRv6EndXFunction,
+)
 from mako.lookup import TemplateLookup
 
 # On Fedora the FRR/RADVVD/SSHD daemons ipmininet starts live outside the
@@ -78,6 +106,13 @@ OSPF6_TEMPLATES = TemplateLookup(
 # iproute2 mode names; SRv6Encap.ENCAP/INLINE happen to use these exact strings.
 _SRV6_MODES = ("encap", "inline")
 
+# Local SID endpoint behaviours ipmininet can install, keyed by the iproute2
+# action name.  A behaviour that ends in a nexthop ("end.dx6", "end.x") needs a
+# "to" node, while the plain "end" is a self-contained transit waypoint.
+_SRV6_SID_BEHAVIORS = ("end.dx6", "end", "end.x")
+_DEFAULT_SID_BEHAVIOR = "end.dx6"
+_NEXTHOP_SID_BEHAVIORS = frozenset({"end.dx6", "end.x"})
+
 
 class TopologyError(ValueError):
     """A YAML topology file is missing or malformed."""
@@ -89,7 +124,8 @@ class TopologyError(ValueError):
 @dataclass(frozen=True, slots=True)
 class Sid:
     address: str
-    to: str
+    behavior: str = _DEFAULT_SID_BEHAVIOR
+    to: str | None = None
     cost: int = 1
 
 
@@ -198,9 +234,21 @@ def _parse_sid(raw: Any, where: str) -> Sid:
         ) from exc
     if prefix.prefixlen != 128:
         raise TopologyError(f"{where}.address: SID {address!r} must be a /128 prefix")
+    behavior = _opt_str_field(mapping, "behavior", where) or _DEFAULT_SID_BEHAVIOR
+    if behavior not in _SRV6_SID_BEHAVIORS:
+        raise TopologyError(
+            f"{where}.behavior: expected one of {', '.join(_SRV6_SID_BEHAVIORS)}, "
+            f"got {behavior!r}"
+        )
+    to = _opt_str_field(mapping, "to", where)
+    if behavior in _NEXTHOP_SID_BEHAVIORS and to is None:
+        raise TopologyError(f"{where}.to: required for SID behavior {behavior!r}")
+    if behavior not in _NEXTHOP_SID_BEHAVIORS and to is not None:
+        raise TopologyError(f"{where}.to: not allowed for SID behavior {behavior!r}")
     return Sid(
         address=prefix.with_prefixlen,
-        to=_str_field(mapping, "to", where),
+        behavior=behavior,
+        to=to,
         cost=_int_field(mapping, "cost", where, 1),
     )
 
@@ -300,10 +348,23 @@ def _validate(topology: Topology) -> None:
                 raise TopologyError(f"link references unknown node {node!r}")
 
     for router in topology.routers:
+        locator = (
+            IPv6Network(router.loopback, strict=False)
+            if router.loopback is not None
+            else None
+        )
         for sid in router.sids:
-            if sid.to not in known:
+            if sid.to is not None and sid.to not in known:
                 raise TopologyError(
                     f"router {router.name!r}: SID {sid.address} targets unknown node {sid.to!r}"
+                )
+            # A SID is only reachable through its router's LocalSIDTable, which
+            # matches the loopback locator: outside of it the endpoint is never
+            # hit and the SRv6 route silently does nothing.
+            if locator is not None and not IPv6Network(sid.address).subnet_of(locator):
+                raise TopologyError(
+                    f"router {router.name!r}: SID {sid.address} is outside its "
+                    f"loopback locator {router.loopback}"
                 )
 
     for policy in topology.policies:
@@ -409,15 +470,43 @@ class YamlSRv6Topo(IPTopo):
             )
             self.sid_tables[router.name] = table
             for sid in router.sids:
-                SRv6EndDX6Function(
-                    net=net,
-                    node=router.name,
-                    to=sid.address,
-                    nexthop=net[sid.to],
-                    table=table,
-                    cost=sid.cost,
-                )
+                self._install_sid(net, router.name, table, sid)
         super().post_build(net)
+
+    @staticmethod
+    def _install_sid(net: IPNet, node: str, table: LocalSIDTable, sid: Sid) -> None:
+        """Install one local SID endpoint on ``node``.
+
+        ``end`` is a self-contained transit waypoint: the node pops its own SID
+        and forwards toward the next segment, which is what lets a segment list
+        steer traffic through a router in the middle of the path.  ``end.x``
+        and ``end.dx6`` instead hand the packet to the ``to`` node's IPv6
+        address (L3 cross-connect / decapsulation toward a local host).
+        """
+        if sid.behavior == "end":
+            SRv6EndFunction(
+                net=net, node=node, to=sid.address, table=table, cost=sid.cost
+            )
+            return
+        assert sid.to is not None  # guaranteed by load_topology()
+        if sid.behavior == "end.x":
+            SRv6EndXFunction(
+                net=net,
+                node=node,
+                to=sid.address,
+                nexthop=net[sid.to],
+                table=table,
+                cost=sid.cost,
+            )
+        elif sid.behavior == "end.dx6":
+            SRv6EndDX6Function(
+                net=net,
+                node=node,
+                to=sid.address,
+                nexthop=net[sid.to],
+                table=table,
+                cost=sid.cost,
+            )
 
 
 # --------------------------------------------------------------------------- #
@@ -431,7 +520,10 @@ def _summary(topology: Topology) -> str:
         f"  policies: {len(topology.policies)}",
     ]
     sids = [
-        f"{r.name}:{sid.address}->{sid.to}" for r in topology.routers for sid in r.sids
+        f"{r.name}:{sid.address}({sid.behavior})"
+        + (f"->{sid.to}" if sid.to is not None else "")
+        for r in topology.routers
+        for sid in r.sids
     ]
     if sids:
         lines.append(f"  local SIDs: {', '.join(sids)}")
