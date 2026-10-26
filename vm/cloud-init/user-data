@@ -1,0 +1,19 @@
+#cloud-config
+users:
+  - name: ubuntu
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    plain_text_passwd: ubuntu
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH8ghZ1An7fvZrgIKu/cUHygieZS9L5QTb45167Xnmxv joel.gonzalez.jimenez
+ssh_pwauth: true
+package_update: true
+package_upgrade: false
+packages: [qemu-guest-agent, nginx]
+growpart:
+  mode: auto
+  devices: ['/']
+resize_rootfs: true
+runcmd:
+  - [ sh, -c, "echo 'VM ready' > /etc/motd" ]

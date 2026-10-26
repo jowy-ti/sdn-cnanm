@@ -25,7 +25,7 @@ make doctor               # preflight checks: FRR, seg6, frrvty, sudoers, import
 make deps                 # reinstall requirements-dev.txt into .venv
 ```
 
-Verify with `make lint` then `make typecheck`. No test suite exists.
+See `docs/RUNBOOK.md` for detailed lab instructions and `docs/VM_GUIDE.md` for VM setup. Verify with `make lint` then `make typecheck`. No test suite exists.
 
 ## Dependencies (pip + venv)
 

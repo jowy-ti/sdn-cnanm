@@ -33,7 +33,14 @@ VM_DISK_SIZE="40G"
 BASE_IMAGE="/var/lib/libvirt/images/jammy-server-cloudimg-amd64.img"
 VM_DISK="/var/lib/libvirt/images/${VM_NAME}.qcow2"
 SEED_ISO="/var/lib/libvirt/images/seed.iso"
-CLOUD_INIT_DIR="/var/lib/libvirt/cloud-init/${VM_NAME}"
+# Prefer repo templates if present, fallback to host paths
+if [[ -d "${REPO_ROOT}/vm/cloud-init" ]] && [[ -f "${REPO_ROOT}/vm/cloud-init/user-data" ]] && [[ -f "${REPO_ROOT}/vm/cloud-init/meta-data" ]]; then
+    CLOUD_INIT_DIR="${REPO_ROOT}/vm/cloud-init"
+    info "Using cloud-init templates from repo: ${CLOUD_INIT_DIR}"
+else
+    CLOUD_INIT_DIR="/var/lib/libvirt/cloud-init/${VM_NAME}"
+    info "Using cloud-init templates from host: ${CLOUD_INIT_DIR}"
+fi
 OS_VARIANT="ubuntu22.04"
 NETWORK="default"
 
