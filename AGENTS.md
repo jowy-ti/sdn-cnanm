@@ -21,7 +21,7 @@ make format               # ruff format .
 make check                # parse/validate topologies/srv6.yaml only (no root, no network)
 make run                  # run the SRv6 topology (passwordless sudo; drops into the Mininet CLI)
 make clean                # remove Mininet leftovers after a crash/Ctrl-C (sudo; mn -c + ipmininet daemon kills)
-make doctor               # preflight checks: FRR, seg6, frrvty, sudoers, imports
+make doctor               # preflight: venv imports, mn/mnexec, FRR, seg6, frrvty
 make deps                 # reinstall requirements-dev.txt into .venv
 ```
 
@@ -29,6 +29,10 @@ See `docs/RUNBOOK.md` for detailed lab instructions and `docs/VM_GUIDE.md` for V
 
 ## Dependencies (pip + venv)
 
+- `.venv` is the **only** Python environment. The project previously used a
+  Pixi/Conda environment; `pixi.toml`/`pixi.lock` have been removed, and all
+  configs, scripts, docs and Makefile targets point at `.venv`. Do not
+  reintroduce a second environment.
 - `requirements.txt` is the runtime set; `requirements-dev.txt` adds ruff,
   pyright and the OpenCode MCP server (`-r requirements.txt` pulls the runtime
   set in).
@@ -53,7 +57,7 @@ See `docs/RUNBOOK.md` for detailed lab instructions and `docs/VM_GUIDE.md` for V
 
 - `ruff.toml` excludes `.venv/` and `typings/`. Do not lint `.venv` (tens of thousands of vendored errors) or fight stub-style rules. Note that setting `exclude` replaces ruff's defaults, so both entries are required.
 
-## Runtime gotchas (see also `info.txt`)
+## Runtime gotchas (see also `docs/RUNBOOK.md`)
 
 - Running a topology needs root: `make run` runs `sudo <repo>/.venv/bin/python <repo>/src/net_topology_yaml.py` (absolute paths, no `-E`: a matching `NOPASSWD` line in `/etc/sudoers.d/net_topology` lets it run passwordless; `-E` would require a `SETENV` sudoers tag). The rule must be a single command line (`python` *and* the script) and it matches the exact argv, so any extra argument (e.g. `--check`) needs a password — run `--check` without sudo via `make check`. `scripts/setup.sh` generates the rule for the current checkout.
 - FRR must be installed system-wide (`apt-get install frr` / `dnf install frr`). The daemons live in `/usr/lib/frr` on Debian/Ubuntu and `/usr/libexec/frr` on Fedora/RHEL, neither of which is on PATH; the entrypoint probes both (plus `/usr/local/lib/frr`) and prepends the one that contains `zebra`/`ospfd`/`ospf6d` — ipmininet does `require_cmd("zebra"/"ospfd"/"ospf6d")` on PATH and fails at `net.start()` otherwise. Run `sudo systemctl disable --now frr` if the system FRR service is running (the topology starts its own instances).
@@ -67,5 +71,7 @@ See `docs/RUNBOOK.md` for detailed lab instructions and `docs/VM_GUIDE.md` for V
 
 ## OpenCode
 
-- `opencode.json` starts LSP (pyright, ruff) and the `pyright` MCP server from `.venv/bin/` — they depend on the venv being installed (`make setup`). Restart opencode after config changes. Use relative paths so the config survives moving the checkout.
-- The MCP server is launched via `scripts/run_jons_mcp_pyright.py`, a wrapper that injects the LSP `workspaceFolders` initialize param missing from `jons-mcp-pyright 0.0.2` (without it, pyright ignores `pyrightconfig.json` entirely and reports bogus strict errors). Delete the wrapper once upstream fixes it.
+- `opencode.json` starts LSP (pyright, ruff) and the `pyright` MCP server from `.venv/bin/` — all three need the venv to exist (`make setup`). Use relative paths so the config survives moving the checkout; OpenCode resolves them from the workspace root, so a missing `.venv` fails the spawn with `NotFound: ChildProcess.spawn (.venv/bin/python …)`.
+- A failed local MCP server is **not** retried: the status stays `failed` after `.venv` appears. Recover with `/mcps` → reconnect, a real config save, or `opencode service restart`. V2 needs no restart for config edits, but reloads fire on content changes — editing only the mtime does not trigger one.
+- V2 shape: servers live under `mcp.servers.<name>`; `enabled` is not a V2 field (use `disabled` to keep one configured but disconnected). Do not reintroduce `mcp.pyright`.
+- The MCP server is launched via `scripts/run_jons_mcp_pyright.py`, a wrapper that injects the LSP `workspaceFolders` initialize param missing from `jons-mcp-pyright 0.0.2`. Without it pyright registers no workspace (it falls back to `rootPath`, never `rootUri`) and ignores `pyrightconfig.json` — including `stubPath` — so `src/net_topology_yaml.py` goes from 0 to 16 bogus `Stub file not found for "ipmininet.*"` diagnostics while the server still shows `connected`. Upstream `master` and the latest PyPI release (0.0.2) both still omit the param; the patch monkeypatches `PyrightClient.request`, so re-validate it on any version bump and drop it once upstream sends `workspaceFolders`.

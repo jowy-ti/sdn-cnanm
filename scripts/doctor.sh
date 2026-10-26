@@ -3,7 +3,8 @@
 # Preflight checks for the sdn-cnanm SRv6 lab.
 #
 # Answers "is this machine ready to run the lab?" without starting it.  Every
-# check is read-only.  Exits non-zero if any check fails.
+# check is read-only and runs unprivileged; sudo configuration is not checked.
+# Exits non-zero if any check fails.
 #
 #   ./scripts/doctor.sh      or:  make doctor
 set -uo pipefail
@@ -12,7 +13,6 @@ REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 VENV=${REPO_ROOT}/.venv
 VENV_PYTHON=${VENV}/bin/python
 ENTRYPOINT=${REPO_ROOT}/src/net_topology_yaml.py
-SUDOERS_FILE=/etc/sudoers.d/net_topology
 
 failures=0
 ok() { printf '  ok    %s\n' "$*"; }
@@ -28,14 +28,35 @@ echo "sdn-cnanm doctor"
 if [[ -x ${VENV_PYTHON} ]]; then
     ok "venv: ${VENV}"
     if "${VENV_PYTHON}" -c 'import ipmininet, mininet, yaml' >/dev/null 2>&1; then
-        version=$("${VENV_PYTHON}" -c \
+        ipmininet_version=$("${VENV_PYTHON}" -c \
             'import importlib.metadata as m; print(m.version("ipmininet"))' 2>/dev/null)
-        ok "python imports (ipmininet ${version})"
+        venv_mininet_version=$("${VENV_PYTHON}" -c \
+            'import importlib.metadata as m; print(m.version("mininet"))' 2>/dev/null)
+        ok "python imports (ipmininet ${ipmininet_version}, mininet ${venv_mininet_version})"
     else
         fail "cannot import ipmininet/mininet/yaml from ${VENV} (run: make setup)"
     fi
 else
     fail "no venv at ${VENV} (run: make setup)"
+fi
+
+# --- Mininet ---------------------------------------------------------------- #
+# The distro package provides the `mn`/`mnexec` binaries that Mininet shells and
+# `mn -c` (ipmininet.clean) rely on; the mininet *Python* module comes from PyPI
+# into the venv (checked above), so both halves are verified separately.  A
+# version skew between them (distro 2.3.1b4 vs PyPI 2.3.0.dev6) is expected.
+if command -v mn >/dev/null 2>&1; then
+    # mn prints its version to stderr, not stdout.
+    mn_version=$(mn --version 2>&1 | head -1)
+    ok "mn: $(command -v mn) (${mn_version})"
+else
+    fail "mn not on PATH (install mininet: apt-get/dnf install mininet)"
+fi
+
+if command -v mnexec >/dev/null 2>&1; then
+    ok "mnexec: $(command -v mnexec)"
+else
+    fail "mnexec not on PATH (install mininet)"
 fi
 
 # --- FRR -------------------------------------------------------------------- #
@@ -61,7 +82,14 @@ else
 fi
 
 if command -v vtysh >/dev/null 2>&1; then
-    ok "vtysh: $(vtysh -c 'show version' 2>/dev/null | head -1)"
+    # `show version` talks to the running daemons through the vty sockets, which
+    # need root; unprivileged it exits non-zero with an empty stdout.
+    vtysh_version=$(vtysh -c 'show version' 2>/dev/null | head -1)
+    if [[ -n ${vtysh_version} ]]; then
+        ok "vtysh: ${vtysh_version}"
+    else
+        ok "vtysh: $(command -v vtysh) (version needs root)"
+    fi
 else
     fail "vtysh not on PATH"
 fi
@@ -106,28 +134,14 @@ elif [[ -r /proc/config.gz ]] &&
 fi
 if $seg6_ok; then
     ok "kernel has CONFIG_IPV6_SEG6_LWTUNNEL"
-elif sudo -n ip sr tunsrc show >/dev/null 2>&1; then
-    ok "kernel accepts seg6 (ip sr tunsrc)"
 else
     skip "could not read the kernel config; assuming seg6 is available"
 fi
 
-# --- sudoers ---------------------------------------------------------------- #
-if sudo -n test -r "${SUDOERS_FILE}" 2>/dev/null || [[ -r ${SUDOERS_FILE} ]]; then
-    ok "sudoers rule: ${SUDOERS_FILE}"
-    if sudo -n -l "${VENV_PYTHON}" "${ENTRYPOINT}" >/dev/null 2>&1; then
-        ok "passwordless sudo for the lab entrypoint"
-    else
-        fail "sudoers rule does not match the current argv (re-run: make setup)"
-    fi
-    if sudo -n -l "${VENV_PYTHON}" -m ipmininet.clean >/dev/null 2>&1; then
-        ok "passwordless sudo for ipmininet.clean"
-    else
-        fail "sudoers rule does not match 'python -m ipmininet.clean' (re-run: make setup)"
-    fi
-else
-    fail "no ${SUDOERS_FILE} (run: make setup)"
-fi
+# --- sudoers (intentionally not checked) ------------------------------------ #
+# The passwordless-sudo rule in /etc/sudoers.d/net_topology is a per-machine
+# setup artifact installed by `make setup`, not a property of this checkout, so
+# it is deliberately not checked here.
 
 # --- topology --------------------------------------------------------------- #
 if [[ -x ${VENV_PYTHON} ]]; then

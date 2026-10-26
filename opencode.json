@@ -12,14 +12,15 @@
     }
   },
   "mcp": {
-    "pyright": {
-      "type": "local",
-      "command": [
-        ".venv/bin/python",
-        "scripts/run_jons_mcp_pyright.py",
-        "."
-      ],
-      "enabled": true
+    "servers": {
+      "pyright": {
+        "type": "local",
+        "command": [
+          ".venv/bin/python",
+          "scripts/run_jons_mcp_pyright.py",
+          "."
+        ]
+      }
     }
   }
 }

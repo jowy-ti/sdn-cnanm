@@ -13,8 +13,9 @@
 # Idempotent: re-running it is a no-op on a machine already set up.
 #
 # What it does:
-#   1. installs the OS packages (frr, iproute2, procps, psmisc, tcpdump, ...)
-#      through apt-get on Debian/Ubuntu or dnf on Fedora/RHEL;
+#   1. installs the OS packages (frr, iproute2, procps, psmisc, tcpdump,
+#      mininet, ...) through apt-get on Debian/Ubuntu or dnf on Fedora/RHEL,
+#      and checks that Mininet's mn/mnexec binaries are on PATH;
 #   2. detects where the distro put the FRR daemons (/usr/lib/frr vs
 #      /usr/libexec/frr) and reports it -- the entrypoint discovers it too;
 #   3. stops and disables the system frr.service (this lab starts its own
@@ -23,7 +24,7 @@
 #      root; FRR aborts otherwise);
 #   5. checks the kernel was built with CONFIG_IPV6_SEG6_LWTUNNEL;
 #   6. creates <repo>/.venv and installs requirements-dev.txt (or
-#      requirements.txt with --runtime-only);
+#      requirements.txt with --runtime-only), then verifies the imports;
 #   7. writes /etc/sudoers.d/net_topology with NOPASSWD entries for the two
 #      exact command lines the lab needs (validated with visudo first);
 #   8. prints a summary and the next commands.
@@ -128,7 +129,23 @@ frr_version() {
 }
 
 # --------------------------------------------------------------------------- #
-# 3. Kernel SRv6 support
+# 3. Mininet
+# --------------------------------------------------------------------------- #
+# The distro package provides the `mn`/`mnexec` binaries that Mininet shells
+# rely on; the mininet *Python* module comes from PyPI into the venv (see
+# requirements.txt), so both halves are checked.
+check_mininet_binaries() {
+    command -v mn >/dev/null 2>&1 && command -v mnexec >/dev/null 2>&1
+}
+
+mininet_version() {
+    command -v mn >/dev/null 2>&1 || return 1
+    # mn writes its version to stderr, not stdout.
+    mn --version 2>&1 | head -1
+}
+
+# --------------------------------------------------------------------------- #
+# 4. Kernel SRv6 support
 # --------------------------------------------------------------------------- #
 check_seg6() {
     local config=/boot/config-$(uname -r)
@@ -149,6 +166,16 @@ check_seg6() {
 # Run
 # --------------------------------------------------------------------------- #
 install_packages
+
+step "Checking the Mininet binaries"
+if check_mininet_binaries; then
+    info "mn: $(command -v mn) ($(mininet_version || echo unknown))"
+    info "mnexec: $(command -v mnexec)"
+else
+    warn "the mininet package did not put 'mn' and 'mnexec' on PATH."
+    warn "Install it (apt-get install mininet / dnf install mininet) and re-run."
+    warn "Mininet shells need mnexec; the Python module comes from requirements.txt."
+fi
 
 step "Detecting the FRR daemon directory"
 if detect_frr_dir; then
@@ -196,6 +223,13 @@ if $RUNTIME_ONLY; then
 else
     run "${VENV_PYTHON}" -m pip install --quiet -r "${REPO_ROOT}/requirements-dev.txt"
 fi
+if $DRY_RUN; then
+    info "would verify the ipmininet/mininet/yaml imports in ${VENV}"
+elif "${VENV_PYTHON}" -c 'import ipmininet, mininet, yaml' >/dev/null 2>&1; then
+    info "imports ok (ipmininet, mininet, yaml)"
+else
+    warn "cannot import ipmininet/mininet/yaml from ${VENV}; re-run: make deps"
+fi
 
 step "Writing ${SUDOERS_FILE}"
 # The lab needs root, and the rule deliberately matches the exact absolute
@@ -236,6 +270,11 @@ else
     info "FRR daemons:       NOT FOUND"
 fi
 info "FRR version:       $(frr_version || echo unknown)"
+if check_mininet_binaries; then
+    info "mininet:           $(command -v mn) ($(mininet_version || echo unknown))"
+else
+    info "mininet:           NOT FOUND (install mininet)"
+fi
 info "sudoers:           ${SUDOERS_FILE}"
 if check_seg6; then
     info "kernel seg6:       available"

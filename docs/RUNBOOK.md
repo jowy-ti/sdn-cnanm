@@ -66,8 +66,8 @@ line, exact argv):
 checkout it runs from. Re-run it after moving the checkout or recreating
 `.venv`.
 
-`seg6` support is already in the kernel. See `info.txt` and `AGENTS.md` for the
-rest of the machine-specific setup.
+`seg6` support is already in the kernel. See `AGENTS.md` for the rest of the
+machine-specific setup.
 
 ---
 
@@ -251,7 +251,7 @@ silently, so read §2.3 before editing a driver.
 
 ### 2.1 SRv6 transit driver
 
-Save as `/tmp/srv6_check.txt`:
+The driver is checked in as `srv6_check.txt` (reproduced below):
 
 ```
 px print("")
@@ -291,7 +291,7 @@ exit
 ### 2.2 Running a driver
 
 ```sh
-sudo -n "$PWD/.venv/bin/python" "$PWD/src/net_topology_yaml.py" < /tmp/srv6_check.txt
+sudo -n "$PWD/.venv/bin/python" "$PWD/src/net_topology_yaml.py" < "$PWD/srv6_check.txt"
 ```
 
 Each run takes roughly a minute (about 25 s of it being the convergence wait)
@@ -326,8 +326,9 @@ without sudo (`make check`).
   This runs Mininet's `mn -c` plus ipmininet's daemon kill patterns, so it
   removes leftover namespaces, links, FRR daemons and `/tmp/*.log`. It needs
   root; `setup.sh` adds the passwordless line.
-- `make doctor` checks the whole stack without starting it: venv imports, FRR
-  daemons and version, `frr.service`, `frrvty`, kernel seg6, sudoers, topology.
+- `make doctor` checks the whole stack without starting it: venv imports, the
+  Mininet `mn`/`mnexec` binaries, FRR daemons and version, `frr.service`,
+  `frrvty`, kernel seg6, topology. The per-machine sudoers rule is not checked.
 - On shutdown Mininet may print a few
   `(rX exited - ignoring cmd('ip link del ...'))` lines. This is benign teardown
   noise: the namespaces/daemons have already exited and the deletion is skipped.
