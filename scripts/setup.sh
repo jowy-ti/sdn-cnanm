@@ -83,11 +83,11 @@ fi
 # 1. Operating-system packages
 # --------------------------------------------------------------------------- #
 APT_PACKAGES=(
-    frr iproute2 iputils-ping procps psmisc tcpdump
+    frr iproute2 iputils-ping procps psmisc tcpdump mininet
     curl ca-certificates make python3 python3-venv python3-pip
 )
 DNF_PACKAGES=(
-    frr iproute iputils procps-ng psmisc tcpdump
+    frr iproute iputils procps-ng psmisc tcpdump mininet
     curl ca-certificates make python3 python3-pip
 )
 

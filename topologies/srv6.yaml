@@ -1,31 +1,9 @@
-# Declarative SRv6 lab that forces traffic through an SRv6 transit router placed
-# in the middle of the path.  Consumed by src/net_topology_yaml.py.
-#
-#     h1 - r1 - r2 - r3 - r4 - r5 - r6 - h2
-#                    |              ^
-#                    +----- r2 - r5 +        (the IGP shortcut)
-#
-# Eight nodes, three of them SRv6-aware:
-#   * h1, h2             end hosts
-#   * r1                 ingress SRv6 edge   (End.DX6 toward h1)
-#   * r4                 middle SRv6 transit  (End: pop the SID, keep forwarding)
-#   * r6                 egress SRv6 edge    (End.DX6 toward h2)
-#   * r2, r3, r5         plain OSPFv3 forwarders (no SRv6 state)
-#
-# The r2-r5 link is a shortcut: OSPFv3 routes h1 -> h2 straight through
-# r2, r5, r6 and never touches r4.  The segment lists below put r4's transit SID
-# first, so the SRH steers every packet through r4 regardless -- that is what an
-# "SRv6 transit router" enforces here.  r4 owns a plain ``end`` SID because it
-# has no host to decapsulate to; it only advances the SRH to the next segment.
-#
 # Schema (see the module docstring of src/net_topology_yaml.py for details):
 #
 #   hosts:    [ {name, use_v6?} ]
 #   routers:  [ {name, use_v6?, loopback?, ospf6?, sids?: [{address, behavior?, to?, cost?}]} ]
 #   links:    [ [a, b] | {nodes: [a, b], options?: {...}} ]
 #   policies: [ {node, to, through: [...], mode?, cost?} ]
-#
-#   sid behavior: end.dx6 (default, needs `to`) | end (transit) | end.x (transit + `to`)
 
 hosts:
   - name: h1
