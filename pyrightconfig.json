@@ -2,6 +2,8 @@
   "typeCheckingMode": "strict",
   "stubPath": "typings",
   "include": ["."],
-  "exclude": [".pixi"],
+  "exclude": [".venv"],
+  "venvPath": ".",
+  "venv": ".venv",
   "reportMissingModuleSource": "none"
 }

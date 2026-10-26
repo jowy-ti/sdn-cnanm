@@ -1,1 +1,1 @@
-exclude = [".pixi", "typings"]
+exclude = [".venv", "typings"]

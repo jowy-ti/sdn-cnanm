@@ -58,9 +58,9 @@ Schema
     transit SRv6 router SIDs before the egress SID), ``mode`` either ``encap``
     (default) or ``inline``.
 
-Run as root:  pixi run net-yaml
+Run as root:  make run
 or with an explicit file:
-    sudo .pixi/envs/default/bin/python src/net_topology_yaml.py my_topo.yaml
+    sudo .venv/bin/python src/net_topology_yaml.py my_topo.yaml
 Use ``--check`` to only parse and validate the file (no root required).
 """
 
@@ -89,11 +89,31 @@ from ipmininet.srv6 import (
 )
 from mako.lookup import TemplateLookup
 
-# On Fedora the FRR/RADVVD/SSHD daemons ipmininet starts live outside the
-# default PATH.
-for _dir in ("/usr/libexec/frr", "/usr/sbin", "/usr/local/sbin"):
-    if os.path.isdir(_dir) and _dir not in os.environ.get("PATH", "").split(os.pathsep):
-        os.environ["PATH"] = _dir + os.pathsep + os.environ["PATH"]
+# The FRR/RADVVD/SSHD daemons ipmininet starts live outside the default PATH,
+# in a directory that depends on the distribution: /usr/lib/frr on
+# Debian/Ubuntu, /usr/libexec/frr on Fedora/RHEL.  ipmininet looks the daemons
+# up with require_cmd("zebra"/"ospfd"/"ospf6d") at net.start(), so the right
+# directory has to be on PATH or every router dies before it starts.
+_FRR_DAEMON_DIRS = ("/usr/lib/frr", "/usr/libexec/frr", "/usr/local/lib/frr")
+_FRR_DAEMONS = ("zebra", "ospfd", "ospf6d")
+
+
+def _prepend_to_path(*directories: str) -> None:
+    """Move each existing directory to the front of PATH, once."""
+    entries = os.environ.get("PATH", "").split(os.pathsep)
+    for directory in directories:
+        if os.path.isdir(directory) and directory not in entries:
+            entries.insert(0, directory)
+    os.environ["PATH"] = os.pathsep.join(entries)
+
+
+for _frr_dir in _FRR_DAEMON_DIRS:
+    if any(
+        os.path.isfile(os.path.join(_frr_dir, daemon)) for daemon in _FRR_DAEMONS
+    ):
+        _prepend_to_path(_frr_dir)
+        break
+_prepend_to_path("/usr/sbin", "/usr/local/sbin")
 
 os.environ.setdefault("NO_COLOR", "1")
 

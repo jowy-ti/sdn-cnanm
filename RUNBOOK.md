@@ -5,9 +5,9 @@ Operator guide for the ipmininet entrypoint in `src/`. It builds the chain
 dynamic FRR underlay, with SRv6 as the data plane and a **transit** SRv6 router
 (`r4`) forced into the path by the segment list.
 
-| Lab  | Script                     | Underlay      | Data plane                                                                                                    | pixi task         |
-| ---- | -------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------- | ----------------- |
-| SRv6 | `src/net_topology_yaml.py` | OSPFv3 (IPv6) | r1/r6 encapsulate toward a remote SID; r4 pops its own SID and forwards (End); r1/r6 decapsulate with End.DX6. | `pixi run net-yaml` |
+| Lab  | Script                     | Underlay      | Data plane                                                                                                    | make target |
+| ---- | -------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------- | ----------- |
+| SRv6 | `src/net_topology_yaml.py` | OSPFv3 (IPv6) | r1/r6 encapsulate toward a remote SID; r4 pops its own SID and forwards (End); r1/r6 decapsulate with End.DX6. | `make run`  |
 
 The lab is fully declarative: nodes, links, locator SIDs and encapsulation
 policies come from `topologies/srv6.yaml` (see §4), so adding nodes/links/SIDs
@@ -16,37 +16,55 @@ does not require touching Python. The script drops into the Mininet CLI
 are grouped by "control plane", "data plane" and "on the wire", and the expected
 output is what the lab actually prints today.
 
-> There is no hard-coded twin any more: the former `src/net_topology.py` /
-> `pixi run net` entrypoint has been deleted. `src/net_topology_yaml.py` is the
-> single entrypoint and `topologies/srv6.yaml` the only lab definition.
+> There is no hard-coded twin any more: the former `src/net_topology.py`
+> entrypoint has been deleted. `src/net_topology_yaml.py` is the single
+> entrypoint and `topologies/srv6.yaml` the only lab definition.
 
 ---
 
 ## 0. Prerequisites (once per machine)
 
+Everything is provisioned by `scripts/setup.sh`. Run it **as your normal user**
+(not with `sudo`): it escalates for the system steps itself, and creates the
+Python venv owned by you.
+
 ```sh
-pixi install                 # creates .pixi/envs/default
-pixi run check-yaml          # parse/validate the topology; no root, no network
-sudo dnf install frr         # Fedora: daemons land in /usr/libexec/frr
-sudo systemctl stop frr      # the topology starts its own FRR instances
-sudo usermod -aG frrvty root # else FRR 10 aborts the config check as root
+./scripts/setup.sh          # or: make setup
 ```
+
+It is idempotent and does, in order:
+
+| Step | What / why |
+|---|---|
+| OS packages | `frr`, `iproute2`, `iputils-ping`, `procps`, `psmisc`, `tcpdump`, `python3-venv`, `python3-pip`, `make`, `curl`, `ca-certificates` — via `apt-get` on Debian/Ubuntu or `dnf` on Fedora/RHEL |
+| FRR daemons | detects `/usr/lib/frr` (Debian/Ubuntu) vs `/usr/libexec/frr` (Fedora); the entrypoint discovers the same directory at runtime |
+| `frr.service` | `systemctl disable --now frr`: the topology starts its own FRR instances inside the Mininet namespaces |
+| `frrvty` | `usermod -aG frrvty root`: ipmininet validates daemon configs as root; without this FRR aborts with `user(root) is not part of vty group specified(frrvty)` |
+| kernel | confirms `CONFIG_IPV6_SEG6_LWTUNNEL` is built in |
+| `.venv` | `python3 -m venv .venv` + `pip install -r requirements-dev.txt` (or `requirements.txt` with `--runtime-only`) |
+| sudoers | writes `/etc/sudoers.d/net_topology` with the two exact command lines below, after validating it with `visudo` |
+
+`./scripts/setup.sh --dry-run` prints every action without changing anything.
 
 Passwordless sudo for the script. The rule must be a **single command line**
 (the interpreter *and* the script, exact absolute argv — see §2.3):
 
 ```
 # /etc/sudoers.d/net_topology
-joelgonzalez ALL=(ALL) NOPASSWD: /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology_yaml.py
+<user> ALL=(ALL) NOPASSWD: <repo>/.venv/bin/python <repo>/src/net_topology_yaml.py
 ```
 
-`pixi run clean` (§3) needs a passwordless line of its own (again a single
-command line, exact argv); add it if you want cleanup without a prompt:
+`make clean` (§3) needs a passwordless line of its own (again a single command
+line, exact argv):
 
 ```
 # /etc/sudoers.d/net_topology
-joelgonzalez ALL=(ALL) NOPASSWD: /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python -m ipmininet.clean
+<user> ALL=(ALL) NOPASSWD: <repo>/.venv/bin/python -m ipmininet.clean
 ```
+
+`setup.sh` generates both, plus `Defaults:<user> env_keep += "TERM"`, for the
+checkout it runs from. Re-run it after moving the checkout or recreating
+`.venv`.
 
 `seg6` support is already in the kernel. See `info.txt` and `AGENTS.md` for the
 rest of the machine-specific setup.
@@ -64,25 +82,24 @@ state. The segment lists list r4's transit SID **first**, before the egress SID.
 ### 1.1 Start
 
 ```sh
-pixi run net-yaml
+make run
 # explicit equivalent (this is the argv the sudoers rule matches):
-sudo -n /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python \
-    /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology_yaml.py
+sudo -n "$PWD/.venv/bin/python" "$PWD/src/net_topology_yaml.py"
 ```
 
 An explicit topology file can be passed positionally (it overrides the default
-`topologies/srv6.yaml`):
+`topologies/srv6.yaml`). Note that the extra argument no longer matches the
+sudoers rule written by `setup.sh`, so sudo will ask for a password:
 
 ```sh
-sudo /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python \
-    /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology_yaml.py my_topo.yaml
+sudo "$PWD/.venv/bin/python" "$PWD/src/net_topology_yaml.py" my_topo.yaml
 ```
 
 Parse/validate only (no root; prints a summary of routers/hosts/links/policies
 and local SIDs):
 
 ```sh
-pixi run check-yaml
+make check
 ```
 
 ### 1.2 Wait for the underlay to converge
@@ -274,8 +291,7 @@ exit
 ### 2.2 Running a driver
 
 ```sh
-sudo -n /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python \
-    /home/joelgonzalez/Documents/sdn-cnanm/src/net_topology_yaml.py < /tmp/srv6_check.txt
+sudo -n "$PWD/.venv/bin/python" "$PWD/src/net_topology_yaml.py" < /tmp/srv6_check.txt
 ```
 
 Each run takes roughly a minute (about 25 s of it being the convergence wait)
@@ -296,20 +312,22 @@ and ends by itself: the `exit` line stops the network.
    `h2.defaultIntf().ip6` works directly.
 
 Also note the sudoers rule matches the *exact* absolute argv, so a relative
-`.pixi/envs/default/bin/python src/net_topology_yaml.py`, or any extra argv such
-as `--check` or `-u`, fails with `sudo: a password is required`. Run `--check`
-without sudo (`pixi run check-yaml`).
+`.venv/bin/python src/net_topology_yaml.py`, or any extra argv such as
+`--check` or `-u`, fails with `sudo: a password is required`. Run `--check`
+without sudo (`make check`).
 
 ---
 
 ## 3. Teardown and troubleshooting
 
 - Normal stop: `exit` at the `mininet>` prompt (runs `net.stop()`).
-- After a crash or `Ctrl-C`, clear leftovers with `pixi run clean` (i.e.
-  `sudo /home/joelgonzalez/Documents/sdn-cnanm/.pixi/envs/default/bin/python -m ipmininet.clean`).
+- After a crash or `Ctrl-C`, clear leftovers with `make clean` (i.e.
+  `sudo "$PWD/.venv/bin/python" -m ipmininet.clean`).
   This runs Mininet's `mn -c` plus ipmininet's daemon kill patterns, so it
   removes leftover namespaces, links, FRR daemons and `/tmp/*.log`. It needs
-  root; add the passwordless line below to avoid a prompt.
+  root; `setup.sh` adds the passwordless line.
+- `make doctor` checks the whole stack without starting it: venv imports, FRR
+  daemons and version, `frr.service`, `frrvty`, kernel seg6, sudoers, topology.
 - On shutdown Mininet may print a few
   `(rX exited - ignoring cmd('ip link del ...'))` lines. This is benign teardown
   noise: the namespaces/daemons have already exited and the deletion is skipped.
@@ -328,7 +346,7 @@ without sudo (`pixi run check-yaml`).
 ## 4. The topology file (`topologies/srv6.yaml`)
 
 The lab is defined entirely in YAML and validated before anything is built;
-`pixi run check-yaml` parses it without root and prints a summary. Adding
+`make check` parses it without root and prints a summary. Adding
 hosts, routers, links, locator SIDs or policies is a data edit, not a code
 change.
 

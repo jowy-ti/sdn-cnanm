@@ -1,0 +1,19 @@
+# Runtime dependencies for the SRv6 lab.
+#
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r requirements.txt
+#
+# ipmininet is not on PyPI in a buildable form (1.0's sdist needs pkg_resources
+# and pins mininet==2.3.0, which does not exist there), so a locally patched
+# wheel lives in vendor/ and is referenced by path.  pip resolves the path
+# relative to this file, not to the current working directory, so installing
+# works from anywhere.
+ipmininet @ file:./vendor/ipmininet-1.1-py3-none-any.whl
+
+# ipmininet's setup.py does not declare mininet as a dependency; keep it
+# explicit (and pinned: newer PyPI releases are dev snapshots).
+mininet==2.3.0.dev6
+
+# src/net_topology_yaml.py reads its topology from a YAML file; declare the
+# parser explicitly instead of relying on a transitive copy.
+PyYAML>=6

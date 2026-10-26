@@ -1,6 +1,5 @@
-# pixi environments
-.pixi/*
-!.pixi/config.toml
+# Python virtual environment (pip)
+.venv/
 
 # Python bytecode
 __pycache__/

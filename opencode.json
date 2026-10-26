@@ -2,12 +2,12 @@
   "$schema": "https://opencode.ai/config.json",
   "lsp": {
     "pyright": {
-      "command": ["pixi", "run", "pyright-langserver", "--stdio"],
+      "command": [".venv/bin/pyright-langserver", "--stdio"],
       "extensions": [".py", ".pyi"],
       "env": {}
     },
     "ruff": {
-      "command": ["pixi", "run", "ruff", "server"],
+      "command": [".venv/bin/ruff", "server"],
       "extensions": [".py"]
     }
   },
@@ -15,11 +15,9 @@
     "pyright": {
       "type": "local",
       "command": [
-        "pixi",
-        "run",
-        "python",
-        "/home/joelgonzalez/Documents/sdn-cnanm/scripts/run_jons_mcp_pyright.py",
-        "/home/joelgonzalez/Documents/sdn-cnanm"
+        ".venv/bin/python",
+        "scripts/run_jons_mcp_pyright.py",
+        "."
       ],
       "enabled": true
     }

@@ -1,0 +1,21 @@
+# Development tooling: lint, typecheck, and the OpenCode LSP/MCP servers.
+#
+#   .venv/bin/pip install -r requirements-dev.txt
+#
+# Install this instead of requirements.txt: it pulls the runtime set in too.
+-r requirements.txt
+
+ruff==0.17.1
+
+# The [nodejs] extra bundles Node (nodejs-wheel-binaries), so no system nodejs
+# is required.  Ubuntu 22.04 ships nodejs 12, which is too old for modern
+# pyright; Debian/Ubuntu users need this extra.
+pyright[nodejs]==1.1.414
+
+# MCP server exposing pyright to OpenCode; launched through the wrapper in
+# scripts/run_jons_mcp_pyright.py.
+jons-mcp-pyright==0.0.2
+
+# Pinned to the version the project was last validated against.  jons-mcp-pyright
+# only requires fastmcp>=3.3.1, and fastmcp's transitive tree moves quickly.
+fastmcp==4.0.10
