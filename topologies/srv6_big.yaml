@@ -1,0 +1,152 @@
+# Topology: 2 ingress + 4 before middle + middle SRv6 + 3 parallel + 7 between middle & egress + 1 egress = 18 routers
+# Schema:
+#
+#   hosts:    [ {name, use_v6?} ]
+#   routers:  [ {name, use_v6?, loopback?, ospf6?, sids?: [{address, behavior?, to?, cost?}]} ]
+#   links:    [ [a, b] | {nodes: [a, b], options?: {...}} ]
+#   policies: [ {node, to, through: [...], mode?, cost?} ]
+
+hosts:
+  - name: h1
+  - name: h2
+
+routers:
+  # ==================== INGRESS (2 routers) ====================
+  - name: ing1                      # ingress edge 1 (SRv6)
+    loopback: 2001:db8:1::1/64
+    sids:
+      - address: 2001:db8:1::10   # End.DX6 -> deliver to h1
+        to: h1
+
+  - name: ing2                      # ingress edge 2 (SRv6)
+    loopback: 2001:db8:2::1/64
+    sids:
+      - address: 2001:db8:2::10   # End.DX6 -> deliver to h1
+        to: h1
+
+  # ==================== BEFORE MIDDLE (4 routers) ====================
+  - name: b1                       # before middle router 1
+    loopback: 2001:db8:3::1/64
+
+  - name: b2                       # before middle router 2
+    loopback: 2001:db8:4::1/64
+
+  - name: b3                       # before middle router 3
+    loopback: 2001:db8:5::1/64
+
+  - name: b4                       # before middle router 4
+    loopback: 2001:db8:6::1/64
+
+  # ==================== MIDDLE (1 SRv6 router + 3 parallel) ====================
+  - name: msrv                     # middle SRv6 router
+    loopback: 2001:db8:7::1/64
+    sids:
+      - address: 2001:db8:7::10   # End -> transit (SRv6)
+        behavior: end
+
+  - name: mpar1                    # router parallel to middle SRv6 router
+    loopback: 2001:db8:8::1/64
+
+  - name: mpar2                    # router parallel to middle SRv6 router
+    loopback: 2001:db8:9::1/64
+
+  - name: mpar3                    # router parallel to middle SRv6 router
+    loopback: 2001:db8:10::1/64
+
+  # ==================== BETWEEN MIDDLE & EGRESS (7 routers) ====================
+  - name: f1                       # forward router 1
+    loopback: 2001:db8:11::1/64
+
+  - name: f2                       # forward router 2
+    loopback: 2001:db8:12::1/64
+
+  - name: f3                       # forward router 3
+    loopback: 2001:db8:13::1/64
+
+  - name: f4                       # forward router 4
+    loopback: 2001:db8:14::1/64
+
+  - name: f5                       # forward router 5
+    loopback: 2001:db8:15::1/64
+
+  - name: f6                       # forward router 6
+    loopback: 2001:db8:16::1/64
+
+  - name: f7                       # forward router 7
+    loopback: 2001:db8:17::1/64
+
+  # ==================== EGRESS (1 router) ====================
+  - name: eg1                      # egress router (SRv6)
+    loopback: 2001:db8:18::1/64
+    sids:
+      - address: 2001:db8:18::10  # End.DX6 -> deliver to h2
+        to: h2
+
+links:
+  # Host connections
+  - [h1, ing1]
+  - [h1, ing2]
+  - [eg1, h2]
+
+  # Ingress to routers before middle
+  - [ing1, b1]
+  - [ing1, b2]
+  - [ing2, b3]
+  - [ing2, b4]
+  - [b1, b2]
+  - [b3, b4]
+  - [b2, b3]
+
+  # Routers before middle to middle routers
+  - [b1, msrv]
+  - [b2, msrv]
+  - [b3, msrv]
+  - [b4, mpar1]
+  - [b1, mpar2]
+  - [b4, mpar3]
+
+  # Middle routers to forward chain (mesh)
+  - [msrv, f1]
+  - [msrv, f2]
+  - [msrv, f3]
+  - [mpar1, f3]
+  - [mpar1, f4]
+  - [mpar2, f2]
+  - [mpar2, f5]
+  - [mpar3, f4]
+  - [mpar3, f6]
+  - [mpar3, f7]
+
+  # Forward chain mesh to egress
+  - [f1, eg1]
+  - [f2, eg1]
+  - [f3, eg1]
+  - [f4, eg1]
+  - [f5, eg1]
+  - [f6, eg1]
+  - [f7, eg1]
+  - [f1, f2]
+  - [f2, f3]
+  - [f3, f4]
+  - [f4, f5]
+  - [f5, f6]
+  - [f6, f7]
+
+policies:
+  # Path 1: via msrv
+  - node: ing1
+    to: h2
+    through: [2001:db8:7::10, 2001:db8:18::10]
+    mode: encap
+
+  # Path 2: via msrv
+  - node: ing2
+    to: h2
+    through: [2001:db8:7::10, 2001:db8:18::10]
+    mode: encap
+
+  # Return path from eg1 to h1
+  - node: eg1
+    to: h1
+    through: [2001:db8:7::10, 2001:db8:1::10]
+    mode: encap

@@ -1,4 +1,4 @@
-# Schema (see the module docstring of src/net_topology_yaml.py for details):
+# Schema:
 #
 #   hosts:    [ {name, use_v6?} ]
 #   routers:  [ {name, use_v6?, loopback?, ospf6?, sids?: [{address, behavior?, to?, cost?}]} ]
@@ -10,46 +10,50 @@ hosts:
   - name: h2
 
 routers:
-  - name: r1                       # ingress edge
+  - name: s1                       # ingress edge
     loopback: 2001:db8:1::1/64
     sids:
       - address: 2001:db8:1::10   # End.DX6 -> deliver to h1
         to: h1
+
   - name: r2                       # transit underlay
     loopback: 2001:db8:2::1/64
+
   - name: r3                       # transit underlay
     loopback: 2001:db8:3::1/64
-  - name: r4                       # middle SRv6 transit waypoint
+
+  - name: s4                       # middle SRv6 transit waypoint
     loopback: 2001:db8:4::1/64
     sids:
       - address: 2001:db8:4::10   # End -> pop and forward to the next segment
         behavior: end
+
   - name: r5                       # transit underlay
     loopback: 2001:db8:5::1/64
-  - name: r6                       # egress edge
+
+  - name: s6                       # egress edge
     loopback: 2001:db8:6::1/64
     sids:
       - address: 2001:db8:6::10   # End.DX6 -> deliver to h2
         to: h2
 
 links:
-  - [h1, r1]
-  - [r1, r2]
+  - [h1, s1]
+  - [s1, r2]
   - [r2, r3]
-  - [r3, r4]
-  - [r4, r5]
-  - [r5, r6]
-  - [r6, h2]
-  - [r2, r5]                      # shortcut: keeps r4 off the IGP shortest path
+  - [r3, s4]
+  - [s4, r5]
+  - [r5, s6]
+  - [s6, h2]
+  - [r2, r5] # shortcut: keeps s4 off the IGP shortest path
 
 policies:
-  # h1 -> h2: r4's transit SID first, then r6's decapsulating SID
-  - node: r1
+  - node: s1
     to: h2
-    through: [2001:db8:4::10, 2001:db8:6::10]
+    through: [2001:db8:4::10, 2001:db8:6::10] # Enforces path s4 -> s6 -> h2
     mode: encap
-  # h2 -> h1: same idea in reverse, again forced through r4
-  - node: r6
+
+  - node: s6
     to: h1
-    through: [2001:db8:4::10, 2001:db8:1::10]
+    through: [2001:db8:4::10, 2001:db8:1::10] # Enforces path s4 -> s1 -> h1
     mode: encap

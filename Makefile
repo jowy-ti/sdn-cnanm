@@ -5,9 +5,6 @@
 #   make run       start the lab; 'exit' at the mininet> prompt tears it down
 #   make clean     remove Mininet/FRR leftovers after a crash or Ctrl-C
 #   make doctor    preflight checks (FRR, seg6, sudoers, imports)
-#   make lint      ruff check
-#   make format    ruff format
-#   make typecheck pyright (strict, must be 0 errors)
 
 REPO_ROOT := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 VENV := $(REPO_ROOT)/.venv
@@ -20,7 +17,7 @@ ENTRYPOINT := $(REPO_ROOT)/src/net_topology_yaml.py
 .PHONY: help setup deps check run clean doctor lint format typecheck
 
 help:
-	@sed -n '2,12p' $(MAKEFILE_LIST) | sed 's/^# \{0,1\}//'
+	@sed -n '2,8p' $(MAKEFILE_LIST) | sed 's/^# \{0,1\}//'
 
 setup:
 	./scripts/setup.sh
@@ -39,12 +36,3 @@ clean:
 
 doctor:
 	./scripts/doctor.sh
-
-lint:
-	$(VENV)/bin/ruff check .
-
-format:
-	$(VENV)/bin/ruff format .
-
-typecheck:
-	$(VENV)/bin/pyright
