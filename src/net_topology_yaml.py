@@ -1,3 +1,35 @@
+"""SRv6 lab whose topology is read from a YAML file.
+
+Builds the SRv6 lab described by ``topologies/srv6.yaml`` (or a file passed on
+the command line): an OSPFv3/FRR underlay with SRv6 as the data plane.  Nodes,
+links, locator SIDs and encapsulation policies are declarative; ``YamlSRv6Topo``
+only translates them into ipmininet objects.
+
+Schema
+------
+``hosts``
+    ``{name, use_v6?}``
+``routers``
+    ``{name, use_v6?, loopback?, ospf6?, sids?}``.  ``loopback`` is the CIDR
+    locator that carries the router's SIDs; it is required when ``sids`` is
+    non-empty and every SID must fall inside it.  ``ospf6`` (default ``true``)
+    controls whether the OSPFv3 daemon runs.  ``sids`` entries are
+    ``{address, behavior?, to?, cost?}`` where ``behavior`` is one of
+    ``end.dx6`` (default; needs ``to``), ``end`` (transit waypoint) or
+    ``end.x`` (cross-connect; needs ``to``).
+``links``
+    ``[a, b]`` or ``{nodes: [a, b], options: {...}}``; ``options`` is passed
+    verbatim to ``IPTopo.addLink``.
+``policies``
+    ``{node, to, through, mode?, cost?}``.  ``node`` is the ingress router,
+    ``to`` a destination node and ``through`` a non-empty list of IPv6 SIDs
+    (list transit SIDs before the egress SID); ``mode`` is ``encap`` (default)
+    or ``inline``.
+
+Run as root (``make run``) to start the lab, or pass ``--check`` to parse and
+validate a file without root.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -13,7 +45,7 @@ import yaml
 from ipmininet.cli import IPCLI
 from ipmininet.ipnet import IPNet
 from ipmininet.iptopo import IPTopo
-from ipmininet.router.config import OSPF6
+from ipmininet.router.config import OSPF, OSPF6, RouterConfig
 from ipmininet.srv6 import (
     LocalSIDTable,
     SRv6Encap,
@@ -210,6 +242,7 @@ def _parse_sid(raw: Any, where: str) -> Sid:
 def _parse_router(raw: Any, where: str) -> Router:
     mapping = _as_mapping(raw, where)
     name = _str_field(mapping, "name", where)
+    use_v6 = _bool_field(mapping, "use_v6", where, True)
     loopback = _opt_str_field(mapping, "loopback", where)
     if loopback is not None:
         try:
@@ -226,9 +259,14 @@ def _parse_router(raw: Any, where: str) -> Router:
         raise TopologyError(
             f"{where}: router {name!r} defines 'sids' but has no 'loopback' locator"
         )
+    if not use_v6 and (sids or loopback is not None):
+        raise TopologyError(
+            f"{where}: router {name!r} has 'use_v6: false' but defines IPv6 "
+            "locators or SIDs"
+        )
     return Router(
         name=name,
-        use_v6=_bool_field(mapping, "use_v6", where, True),
+        use_v6=use_v6,
         loopback=loopback,
         ospf6=_bool_field(mapping, "ospf6", where, True),
         sids=sids,
@@ -248,7 +286,9 @@ def _parse_link(raw: Any, where: str) -> Link:
         mapping: Mapping[str, Any] = {"nodes": cast("list[Any]", raw)}
     else:
         mapping = _as_mapping(raw, where)
-    nodes = _as_sequence(mapping.get("nodes"), f"{where}.nodes")
+    if "nodes" not in mapping:
+        raise TopologyError(f"{where}: missing required key 'nodes'")
+    nodes = _as_sequence(mapping["nodes"], f"{where}.nodes")
     if len(nodes) != 2:
         raise TopologyError(f"{where}.nodes: expected exactly two node names")
     first = _as_str(nodes[0], f"{where}.nodes[0]")
@@ -293,12 +333,17 @@ def _validate(topology: Topology) -> None:
     if not topology.routers:
         raise TopologyError("the topology must define at least one router")
 
-    known = set(names)
-    routers = {router.name for router in topology.routers}
+    nodes: dict[str, Node] = {
+        node.name: node for node in (*topology.routers, *topology.hosts)
+    }
+    routers = {router.name: router for router in topology.routers}
 
     for link in topology.links:
+        first, second = link.nodes
+        if first == second:
+            raise TopologyError(f"link: node {first!r} cannot be linked to itself")
         for node in link.nodes:
-            if node not in known:
+            if node not in nodes:
                 raise TopologyError(f"link references unknown node {node!r}")
 
     for router in topology.routers:
@@ -308,10 +353,17 @@ def _validate(topology: Topology) -> None:
             else None
         )
         for sid in router.sids:
-            if sid.to is not None and sid.to not in known:
-                raise TopologyError(
-                    f"router {router.name!r}: SID {sid.address} targets unknown node {sid.to!r}"
-                )
+            if sid.to is not None:
+                if sid.to not in nodes:
+                    raise TopologyError(
+                        f"router {router.name!r}: SID {sid.address} targets "
+                        f"unknown node {sid.to!r}"
+                    )
+                if not nodes[sid.to].use_v6:
+                    raise TopologyError(
+                        f"router {router.name!r}: SID {sid.address} targets "
+                        f"{sid.to!r}, which has 'use_v6: false'"
+                    )
             # A SID is only reachable through its router's LocalSIDTable, which
             # matches the loopback locator: outside of it the endpoint is never
             # hit and the SRv6 route silently does nothing.
@@ -322,20 +374,35 @@ def _validate(topology: Topology) -> None:
                 )
 
     for policy in topology.policies:
-        if policy.node not in routers:
+        source = routers.get(policy.node)
+        if source is None:
             raise TopologyError(f"policy: {policy.node!r} is not a router")
-        if policy.to not in known:
+        if not source.use_v6:
+            raise TopologyError(
+                f"policy: ingress router {policy.node!r} has 'use_v6: false'"
+            )
+        target = nodes.get(policy.to)
+        if target is None:
             raise TopologyError(
                 f"policy on {policy.node!r}: unknown destination {policy.to!r}"
             )
+        if not target.use_v6:
+            raise TopologyError(
+                f"policy on {policy.node!r}: destination {policy.to!r} has "
+                "'use_v6: false'"
+            )
         for segment in policy.through:
-            if segment in known:
-                continue
+            if segment in nodes:
+                raise TopologyError(
+                    f"policy on {policy.node!r}: segment {segment!r} is a node "
+                    "name; use the IPv6 address of a local SID"
+                )
             try:
                 IPv6Address(segment)
             except ValueError as exc:
                 raise TopologyError(
-                    f"policy on {policy.node!r}: segment {segment!r} is neither a node name nor an IPv6 address"
+                    f"policy on {policy.node!r}: segment {segment!r} is not a "
+                    "valid IPv6 address"
                 ) from exc
 
 
@@ -381,24 +448,53 @@ def load_topology(path: Path) -> Topology:
 # --------------------------------------------------------------------------- #
 # ipmininet topology
 # --------------------------------------------------------------------------- #
+class YamlRouterConfig(RouterConfig):
+    """Router config with a real OSPFv3 on/off switch.
+
+    ``BasicRouterConfig`` appends OSPFv3 automatically whenever ``use_v6`` is
+    set, so ``ospf6: false`` cannot be expressed with it; simply skipping the
+    registration would leave the stock ipmininet OSPFv3 template in place,
+    which FRR 10 rejects.  This config builds the daemon list itself and only
+    registers OSPFv3 -- always with the patched template -- when asked.
+    """
+
+    def __init__(
+        self,
+        node: Any,
+        daemons: Sequence[Any] = (),
+        additional_daemons: Sequence[Any] = (),
+        ospf6: bool = True,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        selected = list(daemons)
+        if node.use_v4:
+            selected.append(OSPF)
+        if node.use_v6 and ospf6:
+            selected.append((OSPF6, {"template_lookup": OSPF6_TEMPLATES}))
+        selected.extend(additional_daemons)
+        super().__init__(node, daemons=selected, *args, **kwargs)
+
+
 class YamlSRv6Topo(IPTopo):
     def __init__(self, topology: Topology, *args: object, **kwargs: object) -> None:
         self.topology = topology
-        self.sid_tables: dict[str, LocalSIDTable] = {}
         super().__init__(*args, **kwargs)
 
     def build(self, *args: object, **kwargs: object) -> None:
         for host in self.topology.hosts:
             self.addHost(host.name, use_v6=host.use_v6)
         for router in self.topology.routers:
+            config = (YamlRouterConfig, {"ospf6": router.ospf6})
             if router.loopback is not None:
                 self.addRouter(
-                    router.name, use_v6=router.use_v6, lo_addresses=[router.loopback]
+                    router.name,
+                    use_v6=router.use_v6,
+                    lo_addresses=[router.loopback],
+                    config=config,
                 )
             else:
-                self.addRouter(router.name, use_v6=router.use_v6)
-            if router.ospf6:
-                self.addDaemon(router.name, OSPF6, template_lookup=OSPF6_TEMPLATES)
+                self.addRouter(router.name, use_v6=router.use_v6, config=config)
         for link in self.topology.links:
             self.addLink(link.nodes[0], link.nodes[1], **link.options)
         super().build(*args, **kwargs)
@@ -422,7 +518,6 @@ class YamlSRv6Topo(IPTopo):
                 net[router.name],
                 matching=[IPv6Network(router.loopback, strict=False)],
             )
-            self.sid_tables[router.name] = table
             for sid in router.sids:
                 self._install_sid(net, router.name, table, sid)
         super().post_build(net)
