@@ -1,11 +1,9 @@
-# Development tooling: lint, typecheck, and the OpenCode LSP/MCP servers.
+# Development tooling: typecheck and the OpenCode LSP/MCP servers.
 #
 #   .venv/bin/pip install -r requirements-dev.txt
 #
 # Install this instead of requirements.txt: it pulls the runtime set in too.
 -r requirements.txt
-
-ruff==0.17.1
 
 # The [nodejs] extra bundles Node (nodejs-wheel-binaries), so no system nodejs
 # is required.  Ubuntu 22.04 ships nodejs 12, which is too old for modern

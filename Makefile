@@ -14,7 +14,7 @@ ENTRYPOINT := $(REPO_ROOT)/src/net_topology_yaml.py
 # `run` and `clean` deliberately use exactly these absolute, argument-free
 # command lines: /etc/sudoers.d/net_topology matches the exact argv, so adding
 # arguments here would make sudo prompt for a password (see RUNBOOK.md §2.3).
-.PHONY: help setup deps check run clean doctor lint format typecheck
+.PHONY: help setup deps check run clean doctor
 
 help:
 	@sed -n '2,8p' $(MAKEFILE_LIST) | sed 's/^# \{0,1\}//'

@@ -8,7 +8,7 @@
 #   ./scripts/setup.sh              # OS packages + venv + sudoers rule
 #   ./scripts/setup.sh --dry-run    # print what would be done
 #   ./scripts/setup.sh --runtime-only
-#                                   # skip the dev tooling (ruff/pyright/MCP)
+#                                   # skip the dev tooling (pyright/MCP)
 #
 # Idempotent: re-running it is a no-op on a machine already set up.
 #
@@ -221,7 +221,13 @@ run "${VENV_PYTHON}" -m pip install --quiet --upgrade pip
 if $RUNTIME_ONLY; then
     run "${VENV_PYTHON}" -m pip install --quiet -r "${REPO_ROOT}/requirements.txt"
 else
-    run "${VENV_PYTHON}" -m pip install --quiet -r "${REPO_ROOT}/requirements-dev.txt"
+    if [[ -f "${REPO_ROOT}/requirements-dev.txt" ]]; then
+        info "Installing from requirements-dev.txt"
+        run "${VENV_PYTHON}" -m pip install --quiet -r "${REPO_ROOT}/requirements-dev.txt"
+    else
+        warn "requirements-dev.txt not found; falling back to requirements.txt"
+        run "${VENV_PYTHON}" -m pip install --quiet -r "${REPO_ROOT}/requirements.txt"
+    fi
 fi
 if $DRY_RUN; then
     info "would verify the ipmininet/mininet/yaml imports in ${VENV}"

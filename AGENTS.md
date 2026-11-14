@@ -15,9 +15,6 @@ All tooling runs from a project-local Python venv (`.venv`, created by
 
 ```sh
 ./scripts/setup.sh        # one-time bootstrap: OS packages, .venv, sudoers rule
-make typecheck            # pyright, strict — must be 0 errors
-make lint                 # ruff check . (always pass `.` — see ruff.toml)
-make format               # ruff format .
 make check                # parse/validate topologies/srv6.yaml only (no root, no network)
 make run                  # run the SRv6 topology (passwordless sudo; drops into the Mininet CLI)
 make clean                # remove Mininet leftovers after a crash/Ctrl-C (sudo; mn -c + ipmininet daemon kills)
@@ -25,7 +22,7 @@ make doctor               # preflight: venv imports, mn/mnexec, FRR, seg6, frrvt
 make deps                 # reinstall requirements-dev.txt into .venv
 ```
 
-See `docs/RUNBOOK.md` for detailed lab instructions and `docs/VM_GUIDE.md` for VM setup. Verify with `make lint` then `make typecheck`. No test suite exists.
+See `docs/RUNBOOK.md` for detailed lab instructions and `docs/VM_GUIDE.md` for VM setup. Verify with `make check` (and `make doctor` for the machine). No test suite exists.
 
 ## Dependencies (pip + venv)
 
@@ -33,9 +30,8 @@ See `docs/RUNBOOK.md` for detailed lab instructions and `docs/VM_GUIDE.md` for V
   Pixi/Conda environment; `pixi.toml`/`pixi.lock` have been removed, and all
   configs, scripts, docs and Makefile targets point at `.venv`. Do not
   reintroduce a second environment.
-- `requirements.txt` is the runtime set; `requirements-dev.txt` adds ruff,
-  pyright and the OpenCode MCP server (`-r requirements.txt` pulls the runtime
-  set in).
+- `requirements.txt` is the runtime set; `requirements-dev.txt` adds pyright and
+  the OpenCode MCP server (`-r requirements.txt` pulls the runtime set in).
 - Use the venv, not system `pip3`: Ubuntu 23.04+ enforces PEP 668 (externally
   managed environment) and a root-owned system install of `ipmininet` would
   shadow the distro `mininet`. Create `.venv` as your user, never root.
@@ -53,10 +49,6 @@ See `docs/RUNBOOK.md` for detailed lab instructions and `docs/VM_GUIDE.md` for V
 - `reportMissingModuleSource` is set to `none` (ipmininet/mininet source is present but untyped in places).
 - `.vscode/settings.json` also sets `python.analysis.stubPath: "typings"` and `python.defaultInterpreterPath` — required for Pylance.
 
-## Lint
-
-- `ruff.toml` excludes `.venv/` and `typings/`. Do not lint `.venv` (tens of thousands of vendored errors) or fight stub-style rules. Note that setting `exclude` replaces ruff's defaults, so both entries are required.
-
 ## Runtime gotchas (see also `docs/RUNBOOK.md`)
 
 - Running a topology needs root: `make run` runs `sudo <repo>/.venv/bin/python <repo>/src/net_topology_yaml.py` (absolute paths, no `-E`: a matching `NOPASSWD` line in `/etc/sudoers.d/net_topology` lets it run passwordless; `-E` would require a `SETENV` sudoers tag). The rule must be a single command line (`python` *and* the script) and it matches the exact argv, so any extra argument (e.g. `--check`) needs a password — run `--check` without sudo via `make check`. `scripts/setup.sh` generates the rule for the current checkout.
@@ -71,7 +63,7 @@ See `docs/RUNBOOK.md` for detailed lab instructions and `docs/VM_GUIDE.md` for V
 
 ## OpenCode
 
-- `opencode.json` starts LSP (pyright, ruff) and the `pyright` MCP server from `.venv/bin/` — all three need the venv to exist (`make setup`). Use relative paths so the config survives moving the checkout; OpenCode resolves them from the workspace root, so a missing `.venv` fails the spawn with `NotFound: ChildProcess.spawn (.venv/bin/python …)`.
+- `opencode.json` starts the pyright LSP and the `pyright` MCP server from `.venv/bin/` — both need the venv to exist (`make setup`). Use relative paths so the config survives moving the checkout; OpenCode resolves them from the workspace root, so a missing `.venv` fails the spawn with `NotFound: ChildProcess.spawn (.venv/bin/python …)`.
 - A failed local MCP server is **not** retried: the status stays `failed` after `.venv` appears. Recover with `/mcps` → reconnect, a real config save, or `opencode service restart`. V2 needs no restart for config edits, but reloads fire on content changes — editing only the mtime does not trigger one.
 - V2 shape: servers live under `mcp.servers.<name>`; `enabled` is not a V2 field (use `disabled` to keep one configured but disconnected). Do not reintroduce `mcp.pyright`.
 - The MCP server is launched via `scripts/run_jons_mcp_pyright.py`, a wrapper that injects the LSP `workspaceFolders` initialize param missing from `jons-mcp-pyright 0.0.2`. Without it pyright registers no workspace (it falls back to `rootPath`, never `rootUri`) and ignores `pyrightconfig.json` — including `stubPath` — so `src/net_topology_yaml.py` goes from 0 to 16 bogus `Stub file not found for "ipmininet.*"` diagnostics while the server still shows `connected`. Upstream `master` and the latest PyPI release (0.0.2) both still omit the param; the patch monkeypatches `PyrightClient.request`, so re-validate it on any version bump and drop it once upstream sends `workspaceFolders`.

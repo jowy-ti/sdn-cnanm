@@ -5,10 +5,6 @@
       "command": [".venv/bin/pyright-langserver", "--stdio"],
       "extensions": [".py", ".pyi"],
       "env": {}
-    },
-    "ruff": {
-      "command": [".venv/bin/ruff", "server"],
-      "extensions": [".py"]
     }
   },
   "mcp": {
