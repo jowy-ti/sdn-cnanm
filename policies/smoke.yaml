@@ -1,0 +1,6 @@
+# Temporary policy applied by `make smoke`; pruned at the end of the run.
+policies:
+  - id: smoke-s6-h2
+    ingress: s6
+    destination: h2
+    via: [s4]

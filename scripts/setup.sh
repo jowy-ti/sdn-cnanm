@@ -8,7 +8,7 @@
 #   ./scripts/setup.sh              # OS packages + venv + sudoers rule
 #   ./scripts/setup.sh --dry-run    # print what would be done
 #   ./scripts/setup.sh --runtime-only
-#                                   # skip the dev tooling (pyright/MCP)
+#                                   # skip the dev tooling (pyright/MCP/pytest)
 #
 # Idempotent: re-running it is a no-op on a machine already set up.
 #
@@ -230,11 +230,18 @@ else
     fi
 fi
 if $DRY_RUN; then
-    info "would verify the ipmininet/mininet/yaml imports in ${VENV}"
+    info "would verify the ipmininet/mininet/yaml and controller imports in ${VENV}"
 elif "${VENV_PYTHON}" -c 'import ipmininet, mininet, yaml' >/dev/null 2>&1; then
     info "imports ok (ipmininet, mininet, yaml)"
 else
     warn "cannot import ipmininet/mininet/yaml from ${VENV}; re-run: make deps"
+fi
+if $DRY_RUN; then
+    info "would verify the controller imports (networkx)"
+elif "${VENV_PYTHON}" -c 'import networkx' >/dev/null 2>&1; then
+    info "controller imports ok (networkx)"
+else
+    warn "cannot import networkx from ${VENV}; re-run: make deps"
 fi
 
 step "Writing ${SUDOERS_FILE}"

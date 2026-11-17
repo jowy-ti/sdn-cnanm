@@ -8,12 +8,14 @@ only translates them into ipmininet objects.
 Schema
 ------
 ``hosts``
-    ``{name, use_v6?}``
+    ``{name, use_v4?, use_v6?}``  (``use_v4`` defaults to ``false``)
 ``routers``
-    ``{name, use_v6?, loopback?, ospf6?, sids?}``.  ``loopback`` is the CIDR
-    locator that carries the router's SIDs; it is required when ``sids`` is
-    non-empty and every SID must fall inside it.  ``ospf6`` (default ``true``)
-    controls whether the OSPFv3 daemon runs.  ``sids`` entries are
+    ``{name, use_v4?, use_v6?, loopback?, ospf6?, sids?}``.  ``use_v4``
+    defaults to ``false``: the lab is IPv6-only, so no IPv4 addresses or
+    OSPFv2 daemon are configured.  ``loopback`` is the CIDR locator that
+    carries the router's SIDs; it is required when ``sids`` is non-empty and
+    every SID must fall inside it.  ``ospf6`` (default ``true``) controls
+    whether the OSPFv3 daemon runs.  ``sids`` entries are
     ``{address, behavior?, to?, cost?}`` where ``behavior`` is one of
     ``end.dx6`` (default; needs ``to``), ``end`` (transit waypoint) or
     ``end.x`` (cross-connect; needs ``to``).
@@ -24,7 +26,13 @@ Schema
     ``{node, to, through, mode?, cost?}``.  ``node`` is the ingress router,
     ``to`` a destination node and ``through`` a non-empty list of IPv6 SIDs
     (list transit SIDs before the egress SID); ``mode`` is ``encap`` (default)
-    or ``inline``.
+    or ``inline``.  ``through`` is installed verbatim as the segment list by
+    the controller; it is never recomputed.
+
+The lab installs local SIDs during ``post_build()``; ingress encapsulation
+policies are owned by the in-process SRv6 controller (``src/srctl``), which
+loads the YAML ``policies`` as its baseline.  Runtime policy changes are applied
+from YAML/JSON documents with ``srctl apply -f <file>``.
 
 Run as root (``make run``) to start the lab, or pass ``--check`` to parse and
 validate a file without root.
@@ -48,10 +56,10 @@ from ipmininet.iptopo import IPTopo
 from ipmininet.router.config import OSPF, OSPF6, RouterConfig
 from ipmininet.srv6 import (
     LocalSIDTable,
-    SRv6Encap,
     SRv6EndDX6Function,
     SRv6EndFunction,
     SRv6EndXFunction,
+    enable_srv6,
 )
 from mako.lookup import TemplateLookup
 
@@ -118,6 +126,7 @@ class Sid:
 @dataclass(frozen=True, slots=True)
 class Node:
     name: str
+    use_v4: bool = False
     use_v6: bool = True
 
 
@@ -242,6 +251,7 @@ def _parse_sid(raw: Any, where: str) -> Sid:
 def _parse_router(raw: Any, where: str) -> Router:
     mapping = _as_mapping(raw, where)
     name = _str_field(mapping, "name", where)
+    use_v4 = _bool_field(mapping, "use_v4", where, False)
     use_v6 = _bool_field(mapping, "use_v6", where, True)
     loopback = _opt_str_field(mapping, "loopback", where)
     if loopback is not None:
@@ -266,6 +276,7 @@ def _parse_router(raw: Any, where: str) -> Router:
         )
     return Router(
         name=name,
+        use_v4=use_v4,
         use_v6=use_v6,
         loopback=loopback,
         ospf6=_bool_field(mapping, "ospf6", where, True),
@@ -277,6 +288,7 @@ def _parse_host(raw: Any, where: str) -> Host:
     mapping = _as_mapping(raw, where)
     return Host(
         name=_str_field(mapping, "name", where),
+        use_v4=_bool_field(mapping, "use_v4", where, False),
         use_v6=_bool_field(mapping, "use_v6", where, True),
     )
 
@@ -332,6 +344,10 @@ def _validate(topology: Topology) -> None:
 
     if not topology.routers:
         raise TopologyError("the topology must define at least one router")
+
+    for node in (*topology.routers, *topology.hosts):
+        if not node.use_v4 and not node.use_v6:
+            raise TopologyError(f"node {node.name!r} has neither IPv4 nor IPv6")
 
     nodes: dict[str, Node] = {
         node.name: node for node in (*topology.routers, *topology.hosts)
@@ -483,32 +499,35 @@ class YamlSRv6Topo(IPTopo):
 
     def build(self, *args: object, **kwargs: object) -> None:
         for host in self.topology.hosts:
-            self.addHost(host.name, use_v6=host.use_v6)
+            self.addHost(host.name, use_v4=host.use_v4, use_v6=host.use_v6)
         for router in self.topology.routers:
             config = (YamlRouterConfig, {"ospf6": router.ospf6})
             if router.loopback is not None:
                 self.addRouter(
                     router.name,
+                    use_v4=router.use_v4,
                     use_v6=router.use_v6,
                     lo_addresses=[router.loopback],
                     config=config,
                 )
             else:
-                self.addRouter(router.name, use_v6=router.use_v6, config=config)
+                self.addRouter(
+                    router.name,
+                    use_v4=router.use_v4,
+                    use_v6=router.use_v6,
+                    config=config,
+                )
         for link in self.topology.links:
             self.addLink(link.nodes[0], link.nodes[1], **link.options)
         super().build(*args, **kwargs)
 
     def post_build(self, net: IPNet) -> None:
-        for policy in self.topology.policies:
-            SRv6Encap(
-                net=net,
-                node=policy.node,
-                to=policy.to,
-                through=list(policy.through),
-                mode=policy.mode,
-                cost=policy.cost,
-            )
+        # Policies are owned by the in-process controller; post_build only
+        # installs the local SID endpoints and enables SRH processing.  The
+        # sysctls have to be registered before net.start(), which is why
+        # enable_srv6 lives here and not in the controller.
+        for node in (*net.routers, *net.hosts):
+            enable_srv6(node)
 
         for router in self.topology.routers:
             if not router.sids:
@@ -612,10 +631,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(_summary(topology))
         return 0
 
+    # Import the controller before starting the lab: a missing dependency must
+    # not leave Mininet namespaces behind.
+    from srctl.models import ControllerError
+    from srctl.runtime import ControllerRuntime
+
     net = IPNet(topo=YamlSRv6Topo(topology))
+    try:
+        controller = ControllerRuntime(net, topology)
+    except ControllerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     net.start()
-    IPCLI(net)
-    net.stop()
+    try:
+        controller.start()
+        IPCLI(net)
+    finally:
+        controller.stop()
+        net.stop()
     return 0
 
 

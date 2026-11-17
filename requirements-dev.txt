@@ -1,4 +1,4 @@
-# Development tooling: typecheck and the OpenCode LSP/MCP servers.
+# Development tooling: typecheck, tests and the OpenCode LSP/MCP servers.
 #
 #   .venv/bin/pip install -r requirements-dev.txt
 #
@@ -17,3 +17,6 @@ jons-mcp-pyright==0.0.2
 # Pinned to the version the project was last validated against.  jons-mcp-pyright
 # only requires fastmcp>=3.3.1, and fastmcp's transitive tree moves quickly.
 fastmcp==4.0.10
+
+# Unit tests for the controller (no root/network).
+pytest==8.3.5

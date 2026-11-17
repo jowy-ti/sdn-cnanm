@@ -63,3 +63,6 @@ class SRv6EndDX6Function:
         cost: int = ...,
         table: LocalSIDTable | None = ...,
     ) -> None: ...
+
+
+def enable_srv6(node: Any) -> None: ...

@@ -17,3 +17,7 @@ mininet==2.3.0.dev6
 # src/net_topology_yaml.py reads its topology from a YAML file; declare the
 # parser explicitly instead of relying on a transitive copy.
 PyYAML>=6
+
+# In-process SRv6 policy controller (src/srctl): graph/path computation.
+# Pinned to a version that still supports Python 3.10 on the Ubuntu 22.04 VM.
+networkx==3.4.2

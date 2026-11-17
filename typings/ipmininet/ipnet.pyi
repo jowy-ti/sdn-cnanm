@@ -4,6 +4,9 @@ from .iptopo import IPTopo
 
 
 class IPNet:
+    routers: list[Any]
+    hosts: list[Any]
+
     def __init__(self, topo: IPTopo | None = None, *args: Any, **kwargs: Any) -> None: ...
     def __getitem__(self, name: str) -> Any: ...
     def start(self) -> None: ...

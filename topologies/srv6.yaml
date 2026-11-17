@@ -1,9 +1,13 @@
 # Schema:
 #
-#   hosts:    [ {name, use_v6?} ]
-#   routers:  [ {name, use_v6?, loopback?, ospf6?, sids?: [{address, behavior?, to?, cost?}]} ]
+#   hosts:    [ {name, use_v4?, use_v6?} ]
+#   routers:  [ {name, use_v4?, use_v6?, loopback?, ospf6?, sids?: [{address, behavior?, to?, cost?}]} ]
 #   links:    [ [a, b] | {nodes: [a, b], options?: {...}} ]
 #   policies: [ {node, to, through: [...], mode?, cost?} ]
+#
+# use_v4 defaults to false: this lab is IPv6-only, so no IPv4 addresses or
+# OSPFv2 daemon are configured.  policies[].through is installed verbatim by
+# the controller as the SRv6 segment list.
 
 hosts:
   - name: h1
