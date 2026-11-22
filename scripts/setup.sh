@@ -237,11 +237,11 @@ else
     warn "cannot import ipmininet/mininet/yaml from ${VENV}; re-run: make deps"
 fi
 if $DRY_RUN; then
-    info "would verify the controller imports (networkx)"
-elif "${VENV_PYTHON}" -c 'import networkx' >/dev/null 2>&1; then
-    info "controller imports ok (networkx)"
+    info "would verify the controller imports (networkx, pyroute2, pydantic)"
+elif "${VENV_PYTHON}" -c 'import networkx, pyroute2, pydantic' >/dev/null 2>&1; then
+    info "controller imports ok (networkx, pyroute2, pydantic)"
 else
-    warn "cannot import networkx from ${VENV}; re-run: make deps"
+    warn "cannot import controller dependencies from ${VENV}; re-run: make deps"
 fi
 
 step "Writing ${SUDOERS_FILE}"

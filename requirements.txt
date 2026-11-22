@@ -18,6 +18,8 @@ mininet==2.3.0.dev6
 # parser explicitly instead of relying on a transitive copy.
 PyYAML>=6
 
-# In-process SRv6 policy controller (src/srctl): graph/path computation.
-# Pinned to a version that still supports Python 3.10 on the Ubuntu 22.04 VM.
+# In-process SRv6 policy controller (src/srctl): graph/path computation,
+# netlink southbound and document validation.
 networkx==3.4.2
+pyroute2==0.9.7
+pydantic==2.14.4

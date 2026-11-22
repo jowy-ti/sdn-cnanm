@@ -14,8 +14,8 @@ make run              # start the lab + controller, then the Mininet CLI
 While the lab runs, drive the SRv6 controller without `make`:
 
 ```sh
-./scripts/srctl status
-./scripts/srctl apply -f policies/smoke.yaml
+./scripts/srctl.sh status
+./scripts/srctl.sh apply -f policies/smoke.yaml
 ```
 
 All tooling runs from the project-local `.venv` created by `scripts/setup.sh`.

@@ -30,17 +30,17 @@ The default path is `/tmp/srctl-<uid>.sock`. Under `sudo`, the controller uses
 `make run`, sudo may strip it, in which case use `--socket` on the client to
 match a custom server path.
 
-`./scripts/srctl` is a thin wrapper around the repo `.venv`; it needs no `sudo`
+`./scripts/srctl.sh` is a thin wrapper around the repo `.venv`; it needs no `sudo`
 and works from any directory.
 
 ```sh
-./scripts/srctl --help
+./scripts/srctl.sh --help
 ```
 
 Equivalent invocations:
 
 ```sh
-./scripts/srctl status
+./scripts/srctl.sh status
 make srctl ARGS="status"
 PYTHONPATH=src .venv/bin/python -m srctl status
 ```
@@ -168,7 +168,7 @@ JSON example:
 ### `status`
 
 ```sh
-./scripts/srctl status
+./scripts/srctl.sh status
 ```
 
 Shows the policy count, the last reconcile actions, last reconcile errors and
@@ -177,7 +177,7 @@ per-policy errors.
 ### `policies`
 
 ```sh
-./scripts/srctl policies
+./scripts/srctl.sh policies
 ```
 
 Lists the effective policies with `id`, `ingress`, `destination`, `segments`,
@@ -186,7 +186,7 @@ Lists the effective policies with `id`, `ingress`, `destination`, `segments`,
 ### `topology`
 
 ```sh
-./scripts/srctl topology
+./scripts/srctl.sh topology
 ```
 
 Shows the controller's graph: routers, hosts, links (with weights) and the SID
@@ -195,9 +195,9 @@ catalog.
 ### `path`
 
 ```sh
-./scripts/srctl path s1 h2
-./scripts/srctl path s1 h2 --via s4
-./scripts/srctl path s1 h2 --avoid r3
+./scripts/srctl.sh path s1 h2
+./scripts/srctl.sh path s1 h2 --via s4
+./scripts/srctl.sh path s1 h2 --avoid r3
 ```
 
 Computes a path and segment list without creating a policy. This talks to the
@@ -206,7 +206,7 @@ live controller and can use the current SID catalog.
 Offline mode (no lab, no socket):
 
 ```sh
-./scripts/srctl --topology topologies/srv6.yaml path s1 h2 --via s4
+./scripts/srctl.sh --topology topologies/srv6.yaml path s1 h2 --via s4
 ```
 
 Offline mode only computes graph paths and segment lists; it cannot resolve
@@ -215,8 +215,8 @@ destination prefixes or egress devices.
 ### `diff`
 
 ```sh
-./scripts/srctl diff -f /tmp/policies.yaml
-./scripts/srctl diff -f /tmp/policies.yaml --prune
+./scripts/srctl.sh diff -f /tmp/policies.yaml
+./scripts/srctl.sh diff -f /tmp/policies.yaml --prune
 ```
 
 Validates the document and prints the planned actions. Does not modify the
@@ -225,8 +225,8 @@ data plane or the controller's desired state.
 ### `apply`
 
 ```sh
-./scripts/srctl apply -f /tmp/policies.yaml
-./scripts/srctl apply -f /tmp/policies.yaml --prune
+./scripts/srctl.sh apply -f /tmp/policies.yaml
+./scripts/srctl.sh apply -f /tmp/policies.yaml --prune
 ```
 
 Applies the document and returns:
@@ -242,7 +242,7 @@ Applies the document and returns:
 ### `reconcile`
 
 ```sh
-./scripts/srctl reconcile
+./scripts/srctl.sh reconcile
 ```
 
 Forces a reconciliation immediately. The controller also reconciles every 5
@@ -266,8 +266,8 @@ policies:
 ```
 
 ```sh
-./scripts/srctl diff -f /tmp/new.yaml
-./scripts/srctl apply -f /tmp/new.yaml
+./scripts/srctl.sh diff -f /tmp/new.yaml
+./scripts/srctl.sh apply -f /tmp/new.yaml
 ```
 
 `diff` shows an `add` for the `h2` prefix on `s6`; `apply` installs it.
@@ -286,7 +286,7 @@ policies:
 ```
 
 ```sh
-./scripts/srctl apply -f /tmp/policies.yaml
+./scripts/srctl.sh apply -f /tmp/policies.yaml
 ```
 
 This shadows the baseline `s1 → h2` policy and changes its segment list to just
@@ -309,7 +309,7 @@ policies:
 ### Make the document authoritative
 
 ```sh
-./scripts/srctl apply -f /tmp/complete-set.yaml --prune
+./scripts/srctl.sh apply -f /tmp/complete-set.yaml --prune
 ```
 
 `--prune` replaces the **entire file-origin set** with the document. File
@@ -324,7 +324,7 @@ a shadowed baseline entry becomes active again.
 
 ```sh
 printf 'policies: []\n' > /tmp/empty.yaml
-./scripts/srctl apply -f /tmp/empty.yaml --prune
+./scripts/srctl.sh apply -f /tmp/empty.yaml --prune
 ```
 
 All file-origin policies are removed and `yaml-1`, `yaml-2`, … are active
@@ -362,16 +362,15 @@ policies:
 
 ## 6. What happens under the hood
 
-1. The document is parsed and validated as a whole (unknown keys, mixed
-   schemas, duplicate ids/keys, invalid modes/metrics, unknown nodes/SIDs).
+1. The document is parsed and validated as a whole (Pydantic models; unknown keys, mixed schemas, duplicate ids/keys, invalid modes/metrics, unknown nodes/SIDs).
 2. The file-origin set is merged; file policies override baseline policies by
    `id` or `(ingress, destination)`.
 3. The desired state is resolved:
    - destination prefixes from the live node interfaces,
-   - egress device from `ip -6 route get <first SID>`,
+   - egress device from a pyroute2 route lookup for the first SID,
    - forwarding-order segment list.
-4. The reconciler diffs against the live `encap seg6` routes and applies:
-   - same prefix, new segments → `ip -6 route replace ...`
+4. The reconciler diffs against the live `encap seg6` routes (pyroute2 netlink) and applies:
+   - same prefix, new segments → route replace,
    - new prefix/ingress → add the new route and delete the old controller-owned
      route,
    - unchanged → `noop`.
@@ -388,8 +387,8 @@ policies:
 Check the controller's view:
 
 ```sh
-./scripts/srctl status
-./scripts/srctl policies
+./scripts/srctl.sh status
+./scripts/srctl.sh policies
 ```
 
 Check the data plane on the ingress:
@@ -445,21 +444,21 @@ Exit codes: `0` on success, `1` on control errors (`invalid`, `conflict`,
 
 ```sh
 # inspect
-./scripts/srctl status
-./scripts/srctl policies
-./scripts/srctl topology
-./scripts/srctl path s1 h2 --via s4
+./scripts/srctl.sh status
+./scripts/srctl.sh policies
+./scripts/srctl.sh topology
+./scripts/srctl.sh path s1 h2 --via s4
 
 # plan and apply
-./scripts/srctl diff -f /tmp/policies.yaml
-./scripts/srctl apply -f /tmp/policies.yaml
-./scripts/srctl apply -f /tmp/policies.yaml --prune
+./scripts/srctl.sh diff -f /tmp/policies.yaml
+./scripts/srctl.sh apply -f /tmp/policies.yaml
+./scripts/srctl.sh apply -f /tmp/policies.yaml --prune
 
 # force a retry
-./scripts/srctl reconcile
+./scripts/srctl.sh reconcile
 
 # offline path computation
-./scripts/srctl --topology topologies/srv6.yaml path s1 h2 --via s4
+./scripts/srctl.sh --topology topologies/srv6.yaml path s1 h2 --via s4
 
 # live end-to-end smoke test
 make smoke

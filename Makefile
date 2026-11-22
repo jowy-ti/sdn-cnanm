@@ -35,7 +35,7 @@ test:
 	$(VENV_PYTHON) -m pytest tests -q
 
 srctl:
-	./scripts/srctl $(ARGS)
+	./scripts/srctl.sh $(ARGS)
 
 smoke:
 	sudo $(VENV_PYTHON) $(ENTRYPOINT) < $(REPO_ROOT)/scripts/controller-smoke.txt

@@ -5,4 +5,4 @@
 *.txt text eol=lf
 *.yaml text eol=lf
 Makefile text eol=lf
-scripts/srctl text eol=lf
+scripts/srctl.sh text eol=lf

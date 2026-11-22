@@ -11,6 +11,7 @@
     "servers": {
       "pyright": {
         "type": "local",
+        "disabled": false,
         "command": [
           ".venv/bin/python",
           "scripts/run_jons_mcp_pyright.py",

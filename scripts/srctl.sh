@@ -2,10 +2,10 @@
 #
 # Run the SRv6 controller CLI without make.
 #
-#   ./scripts/srctl status
-#   ./scripts/srctl apply -f policies/smoke.yaml
-#   ./scripts/srctl diff -f policies/smoke.yaml
-#   ./scripts/srctl path s1 h2 --via s4
+#   ./scripts/srctl.sh status
+#   ./scripts/srctl.sh apply -f policies/smoke.yaml
+#   ./scripts/srctl.sh diff -f policies/smoke.yaml
+#   ./scripts/srctl.sh path s1 h2 --via s4
 #
 # The controller itself must be running (make run).  Relative file arguments
 # are resolved against the caller's current directory.

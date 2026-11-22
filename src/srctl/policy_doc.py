@@ -10,22 +10,32 @@ forms are accepted, but not mixed in the same entry:
 ``node`` / ``to`` / ``through``
     The topology-style form.  ``through`` is installed verbatim as the explicit
     segment list.
+
+The per-entry schema and validation are Pydantic models; this module converts
+them to the transport-free ``PolicySpec`` dataclass.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Annotated, Any, Literal, cast
 
 import yaml
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+)
 
 from .models import ControllerError
 
-_MODES = ("encap", "inline")
+NonEmptyStr = Annotated[str, StringConstraints(min_length=1)]
+
 _API_KEYS = frozenset({"ingress", "destination", "via", "avoid"})
 _TOPOLOGY_KEYS = frozenset({"node", "to", "through"})
-_COMMON_KEYS = frozenset({"id", "mode", "metric", "cost"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +52,44 @@ class PolicySpec:
     id: str | None = None
 
 
+class _PolicyBase(BaseModel):
+    """Fields shared by both document forms."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    id: NonEmptyStr | None = None
+    mode: Literal["encap", "inline"] = "encap"
+    metric: int = Field(default=1, ge=0)
+    cost: int | None = Field(default=None, ge=0)
+
+    @property
+    def selected_metric(self) -> int:
+        return self.cost if self.cost is not None else self.metric
+
+
+class ApiPolicy(_PolicyBase):
+    """``ingress`` / ``destination`` / ``via`` form."""
+
+    ingress: NonEmptyStr
+    destination: NonEmptyStr
+    via: list[NonEmptyStr] | None = None
+    avoid: list[NonEmptyStr] | None = None
+
+
+class TopologyPolicy(_PolicyBase):
+    """``node`` / ``to`` / ``through`` form."""
+
+    node: NonEmptyStr
+    to: NonEmptyStr
+    through: list[NonEmptyStr] = Field(min_length=1)
+
+
+class _PolicyDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    policies: list[Any]
+
+
 def parse_policy_document(text: str) -> tuple[PolicySpec, ...]:
     """Parse and validate a YAML/JSON policy document."""
     try:
@@ -52,18 +100,14 @@ def parse_policy_document(text: str) -> tuple[PolicySpec, ...]:
     if raw is None:
         raise ControllerError("the policy document is empty")
     if isinstance(raw, Mapping):
-        mapping = cast("Mapping[str, Any]", raw)
-        unknown = set(mapping) - {"policies"}
-        if unknown:
+        root = cast("Mapping[str, Any]", raw)
+        try:
+            document = _PolicyDocument.model_validate(dict(root))
+        except ValidationError as exc:
             raise ControllerError(
-                "unknown top-level keys: " + ", ".join(sorted(unknown))
-            )
-        if "policies" not in mapping:
-            raise ControllerError("the policy document needs a 'policies' list")
-        value = mapping["policies"]
-        if not isinstance(value, list):
-            raise ControllerError("'policies' must be a list")
-        raw_policies = cast("list[Any]", value)
+                f"invalid policy document: {_format_errors(exc)}"
+            ) from exc
+        raw_policies: list[Any] = document.policies
     elif isinstance(raw, list):
         raw_policies = cast("list[Any]", raw)
     else:
@@ -96,95 +140,47 @@ def _parse_spec(raw: Any, where: str) -> PolicySpec:
         raise ControllerError(f"{where}: expected a mapping")
     mapping = cast("Mapping[str, Any]", raw)
     keys = set(mapping)
-    unknown = keys - (_API_KEYS | _TOPOLOGY_KEYS | _COMMON_KEYS)
-    if unknown:
-        raise ControllerError(
-            f"{where}: unknown keys: " + ", ".join(sorted(unknown))
-        )
-
     api_style = bool(keys & _API_KEYS)
     topology_style = bool(keys & _TOPOLOGY_KEYS)
     if api_style and topology_style:
         raise ControllerError(
             f"{where}: cannot mix ingress/destination/via with node/to/through"
         )
-
-    policy_id = _optional_str(mapping, "id", where)
-    mode = _optional_str(mapping, "mode", where) or "encap"
-    if mode not in _MODES:
-        raise ControllerError(f"{where}.mode: expected one of {', '.join(_MODES)}")
+    if not api_style and not topology_style:
+        raise ControllerError(
+            f"{where}: expected ingress/destination or node/to/through"
+        )
     if "metric" in mapping and "cost" in mapping:
         raise ControllerError(f"{where}: use either 'metric' or 'cost', not both")
-    metric = _int_field(mapping, "cost" if "cost" in mapping else "metric", where, 1)
 
-    if api_style:
-        ingress = _required_str(mapping, "ingress", where)
-        destination = _required_str(mapping, "destination", where)
-        via = _str_list(mapping.get("via"), f"{where}.via")
-        avoid = _str_list(mapping.get("avoid"), f"{where}.avoid")
+    try:
+        if api_style:
+            api = ApiPolicy.model_validate(dict(mapping))
+            return PolicySpec(
+                ingress=api.ingress,
+                destination=api.destination,
+                via=tuple(api.via or ()),
+                avoid=tuple(api.avoid or ()),
+                mode=api.mode,
+                metric=api.selected_metric,
+                id=api.id,
+            )
+        topology = TopologyPolicy.model_validate(dict(mapping))
         return PolicySpec(
-            ingress=ingress,
-            destination=destination,
-            via=via,
-            avoid=avoid,
-            mode=mode,
-            metric=metric,
-            id=policy_id,
+            ingress=topology.node,
+            destination=topology.to,
+            through=tuple(topology.through),
+            mode=topology.mode,
+            metric=topology.selected_metric,
+            id=topology.id,
         )
-
-    if topology_style:
-        ingress = _required_str(mapping, "node", where)
-        destination = _required_str(mapping, "to", where)
-        through = _str_list(mapping.get("through"), f"{where}.through")
-        if not through:
-            raise ControllerError(f"{where}.through: at least one SID is required")
-        return PolicySpec(
-            ingress=ingress,
-            destination=destination,
-            through=through,
-            mode=mode,
-            metric=metric,
-            id=policy_id,
-        )
-
-    raise ControllerError(
-        f"{where}: expected ingress/destination or node/to/through"
-    )
+    except ValidationError as exc:
+        raise ControllerError(f"{where}: {_format_errors(exc)}") from exc
 
 
-def _required_str(mapping: Mapping[str, Any], key: str, where: str) -> str:
-    if key not in mapping:
-        raise ControllerError(f"{where}: missing required key {key!r}")
-    value = mapping[key]
-    if not isinstance(value, str) or not value:
-        raise ControllerError(f"{where}.{key}: expected a non-empty string")
-    return value
-
-
-def _optional_str(mapping: Mapping[str, Any], key: str, where: str) -> str | None:
-    value = mapping.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value:
-        raise ControllerError(f"{where}.{key}: expected a non-empty string")
-    return value
-
-
-def _str_list(value: Any, where: str) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if not isinstance(value, list):
-        raise ControllerError(f"{where}: expected a list")
-    items: list[str] = []
-    for index, item in enumerate(cast("list[Any]", value)):
-        if not isinstance(item, str) or not item:
-            raise ControllerError(f"{where}[{index}]: expected a non-empty string")
-        items.append(item)
-    return tuple(items)
-
-
-def _int_field(mapping: Mapping[str, Any], key: str, where: str, default: int) -> int:
-    value = mapping.get(key, default)
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ControllerError(f"{where}.{key}: expected an integer >= 0")
-    return value
+def _format_errors(exc: ValidationError) -> str:
+    parts: list[str] = []
+    for error in exc.errors():
+        location = ".".join(str(part) for part in error["loc"]) or "<root>"
+        parts.append(f"{location}: {error['msg']}")
+    return "; ".join(parts)

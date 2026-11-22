@@ -89,3 +89,4 @@ class ControllerRuntime:
             self._reconcile_thread.join(timeout=5)
             self._reconcile_thread = None
         self.control.stop()
+        self.controller.close()

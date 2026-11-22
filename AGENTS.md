@@ -17,7 +17,7 @@ All tooling runs from a project-local Python venv (`.venv`, created by
 ./scripts/setup.sh        # one-time bootstrap: OS packages, .venv, sudoers rule
 make check                # parse/validate topologies/srv6.yaml only (no root, no network)
 make test                 # controller unit tests (no root, no network)
-./scripts/srctl status    # controller CLI without make (lab must be running)
+./scripts/srctl.sh status    # controller CLI without make (lab must be running)
 make srctl ARGS="status"  # same CLI through make
 make smoke                # live controller smoke driver (root; ~1 minute)
 make run                  # start the lab + controller (passwordless sudo; Mininet CLI)
@@ -63,9 +63,9 @@ Design notes for whichever scope is being implemented:
 
 - `models.py` — SID/policy/route dataclasses and controller exceptions.
 - `topology.py` — YAML → networkx graph, SID catalog, waypoint/path resolution.
-- `southbound.py` — `LiveSouthbound` (iproute2 through Mininet nodes) and `DryRunSouthbound` (tests).
+- `southbound.py` — `LiveSouthbound` (pyroute2 netlink on the Mininet nodes) and `DryRunSouthbound` (tests).
 - `reconciler.py` — desired-vs-actual diff; only routes the controller installed are ever deleted.
-- `policy_doc.py` — parser for YAML/JSON policy documents.
+- `policy_doc.py` — Pydantic models and parser for YAML/JSON policy documents.
 - `service.py` — baseline/overlay policy state, document apply, path computation.
 - `control.py` — Unix-domain-socket server and client (the only client surface is `srctl`).
 - `runtime.py` — starts the control socket and the periodic reconcile loop.
@@ -100,17 +100,17 @@ Common commands:
 
 ```sh
 make run                                   # lab + controller
-./scripts/srctl status                     # no make needed; works from any cwd
-./scripts/srctl policies
-./scripts/srctl diff -f policies/smoke.yaml
-./scripts/srctl apply -f policies/smoke.yaml
-./scripts/srctl apply -f policies/smoke.yaml --prune
-./scripts/srctl path s1 h2 --via s4        # against the live controller
-./scripts/srctl --topology topologies/srv6.yaml path s1 h2 --via s4  # offline
+./scripts/srctl.sh status                     # no make needed; works from any cwd
+./scripts/srctl.sh policies
+./scripts/srctl.sh diff -f policies/smoke.yaml
+./scripts/srctl.sh apply -f policies/smoke.yaml
+./scripts/srctl.sh apply -f policies/smoke.yaml --prune
+./scripts/srctl.sh path s1 h2 --via s4        # against the live controller
+./scripts/srctl.sh --topology topologies/srv6.yaml path s1 h2 --via s4  # offline
 make smoke                                 # live end-to-end driver (root)
 ```
 
-`scripts/srctl` is a thin wrapper that runs `python -m srctl.cli` with `PYTHONPATH=src` and the repo `.venv`; `make srctl ARGS="..."` is the equivalent make target. Neither needs `sudo`; only `make run` / `make smoke` do.
+`scripts/srctl.sh` is a thin wrapper that runs `python -m srctl.cli` with `PYTHONPATH=src` and the repo `.venv`; `make srctl ARGS="..."` is the equivalent make target. Neither needs `sudo`; only `make run` / `make smoke` do.
 
 See `docs/SRCTL.md` for the full controller CLI guide. `scripts/controller-smoke.txt` is the Mininet driver behind `make smoke`: it waits for OSPFv3, lists/validates/applies/prunes `policies/smoke.yaml`, checks the ingress routes and pings h1→h2.
 
@@ -127,10 +127,10 @@ IPv4 is intentionally absent: `use_v4` defaults to false in the YAML schema and 
 - `requirements.txt` is the runtime set; `requirements-dev.txt` adds pyright, the
   OpenCode MCP server and the controller test tooling (`pytest`;
   `-r requirements.txt` pulls the runtime set in).
-- The controller adds `networkx` to the runtime set (pinned to a version that
-  still installs on the Ubuntu 22.04 VM's Python 3.10). Controller unit tests
-  live in `tests/` and run with `make test`; they do not need root, Mininet or
-  FRR.
+- The controller adds `networkx`, `pyroute2` and `pydantic` to the runtime set
+  (pinned to versions that still install on the Ubuntu 22.04 VM's Python 3.10).
+  Controller unit tests live in `tests/` and run with `make test`; they do not
+  need root, Mininet or FRR.
 - Use the venv, not system `pip3`: Ubuntu 23.04+ enforces PEP 668 (externally
   managed environment) and a root-owned system install of `ipmininet` would
   shadow the distro `mininet`. Create `.venv` as your user, never root.
@@ -145,7 +145,7 @@ IPv4 is intentionally absent: `use_v4` defaults to false in the YAML schema and 
 - Strict mode is enforced by both `pyrightconfig.json` and `.vscode/settings.json` (Pylance). Keep them in sync.
 - pyright does **not** auto-detect `.venv`: `pyrightconfig.json` sets `venvPath`/`venv` explicitly. Without that, pyright analyses against the system interpreter and reports bogus `reportMissingImports` for `jons_mcp_pyright`.
 - `ipmininet` ships no stubs. Hand-written stubs live in `typings/` (`ipmininet/`, subpackages included, plus `mako/` and `yaml/` — neither ships `py.typed`) and are wired in via `stubPath`. Never delete them; when you use an ipmininet API not yet covered, add it to the matching stub file instead of adding type ignores.
-- The controller uses `networkx` and the stdlib control socket; only the ipmininet stubs needed extending (`enable_srv6`, `IPNet.routers`/`hosts`, `RouterConfig.daemons`). `tests/` is covered by strict mode too.
+- The controller uses `networkx`, `pyroute2` and `pydantic`; pyroute2 ships no stubs, so a minimal stub lives in `typings/pyroute2/`. The ipmininet stubs needed extending (`enable_srv6`, `IPNet.routers`/`hosts`, `RouterConfig.daemons`). `tests/` is covered by strict mode too.
 - `reportMissingModuleSource` is set to `none` (ipmininet/mininet source is present but untyped in places).
 - `.vscode/settings.json` also sets `python.analysis.stubPath: "typings"` and `python.defaultInterpreterPath` — required for Pylance.
 

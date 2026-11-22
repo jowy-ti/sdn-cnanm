@@ -1,58 +1,79 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from srctl.models import DesiredRoute, RouteState
-from srctl.southbound import LiveSouthbound, SouthboundError
-
-ROUTE_OUTPUT = """\
-fc00:0:d::/48  encap seg6 mode encap segs 2 [ 2001:db8:4::10 2001:db8:6::10 ] dev s1-eth1 metric 1 pref medium
-2001:db8:6::/64 dev s6-eth1 proto kernel metric 256 pref medium
-"""
-
-
-class FakeNode:
-    def __init__(self) -> None:
-        self.calls: list[list[str]] = []
-
-    def pexec(self, argv: list[str]) -> tuple[str, str, int]:
-        self.calls.append(argv)
-        if argv[:3] == ["ip", "-6", "route"] and argv[3] == "show":
-            return ROUTE_OUTPUT, "", 0
-        if argv[:4] == ["ip", "-6", "route", "get"]:
-            return (
-                "2001:db8:4::10 from :: via fe80::1 dev s1-eth1 src fc00:0::1 "
-                "metric 20 pref medium\n",
-                "",
-                0,
-            )
-        return "", "", 0
+from srctl.southbound import (
+    DryRunSouthbound,
+    LiveSouthbound,
+    SouthboundError,
+    route_state_from_message,
+    srh_from_encap,
+)
 
 
-class FakeNet(dict[str, FakeNode]):
-    pass
+class FakeEncap:
+    def __init__(self, srh: dict[str, Any]) -> None:
+        self._attrs = [("SEG6_IPTUNNEL_SRH", srh)]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._attrs if key == "attrs" else default
 
 
-def test_parse_encap_routes_and_egress_dev() -> None:
-    node = FakeNode()
-    southbound = LiveSouthbound(FakeNet(s1=node))
+class FakeMessage:
+    def __init__(self, attrs: dict[str, Any], **fields: Any) -> None:
+        self._attrs = attrs
+        self._fields = fields
 
-    routes = southbound.list_encap_routes("s1")
-    assert routes == (
-        RouteState(
-            prefix="fc00:0:d::/48",
-            segments=("2001:db8:4::10", "2001:db8:6::10"),
-            mode="encap",
-            metric=1,
-            dev="s1-eth1",
-        ),
+    def get_attr(self, name: str) -> Any:
+        return self._attrs.get(name)
+
+    def get(self, name: str, default: Any = None) -> Any:
+        return self._fields.get(name, default)
+
+
+def test_parse_seg6_route_message() -> None:
+    message = FakeMessage(
+        {
+            "RTA_ENCAP_TYPE": 5,
+            "RTA_ENCAP": FakeEncap(
+                {
+                    "mode": "encap",
+                    "segs": ["2001:db8:4::10", "2001:db8:6::10"],
+                }
+            ),
+            "RTA_DST": "fc00:0:d::",
+            "RTA_PRIORITY": 1,
+            "RTA_OIF": 3,
+        },
+        dst_len=48,
     )
-    assert southbound.egress_dev("s1", "2001:db8:4::10") == "s1-eth1"
+    state = route_state_from_message(message, {3: "s1-eth1"})
+    assert state == RouteState(
+        prefix="fc00:0:d::/48",
+        segments=("2001:db8:4::10", "2001:db8:6::10"),
+        mode="encap",
+        metric=1,
+        dev="s1-eth1",
+    )
 
 
-def test_replace_and_delete_commands() -> None:
-    node = FakeNode()
-    southbound = LiveSouthbound(FakeNet(s1=node))
+def test_non_seg6_route_is_ignored() -> None:
+    message = FakeMessage({"RTA_ENCAP_TYPE": 1}, dst_len=48)
+    assert route_state_from_message(message, {}) is None
+
+
+def test_srh_extraction() -> None:
+    assert srh_from_encap(None) is None
+    assert srh_from_encap({"attrs": []}) is None
+    srh = {"mode": "encap", "segs": ["2001:db8::1"]}
+    assert srh_from_encap(FakeEncap(srh)) == srh
+
+
+def test_dry_run_records_routes() -> None:
+    southbound = DryRunSouthbound()
     route = DesiredRoute(
         policy_id="p1",
         ingress="s1",
@@ -63,38 +84,21 @@ def test_replace_and_delete_commands() -> None:
         dev="s1-eth1",
     )
     southbound.replace("s1", route)
-    assert node.calls[-1] == [
-        "ip",
-        "-6",
-        "route",
-        "replace",
-        "fc00:0:d::/48",
-        "encap",
-        "seg6",
-        "mode",
-        "encap",
-        "segs",
-        "2001:db8:4::10,2001:db8:6::10",
-        "metric",
-        "1",
-        "dev",
-        "s1-eth1",
-    ]
-
-    southbound.delete(
-        "s1",
+    assert southbound.list_encap_routes("s1") == (
         RouteState(
-            prefix=route.prefix,
-            segments=route.segments,
-            mode=route.mode,
-            metric=route.metric,
-            dev=route.dev,
+            prefix="fc00:0:d::/48",
+            segments=("2001:db8:4::10", "2001:db8:6::10"),
+            mode="encap",
+            metric=1,
+            dev="s1-eth1",
         ),
     )
-    assert node.calls[-1][3] == "del"
+    southbound.delete("s1", southbound.list_encap_routes("s1")[0])
+    assert southbound.list_encap_routes("s1") == ()
 
 
-def test_unknown_node_is_an_error() -> None:
-    southbound = LiveSouthbound(FakeNet())
+def test_live_southbound_requires_a_started_node() -> None:
     with pytest.raises(SouthboundError):
-        southbound.egress_dev("s1", "2001:db8:4::10")
+        LiveSouthbound({}).egress_dev("s1", "2001:db8:4::10")
+    with pytest.raises(SouthboundError):
+        LiveSouthbound({"s1": object()}).egress_dev("s1", "2001:db8:4::10")

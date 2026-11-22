@@ -36,8 +36,8 @@ if [[ -x ${VENV_PYTHON} ]]; then
     else
         fail "cannot import ipmininet/mininet/yaml from ${VENV} (run: make setup)"
     fi
-    if "${VENV_PYTHON}" -c 'import networkx' >/dev/null 2>&1; then
-        ok "controller imports (networkx)"
+    if "${VENV_PYTHON}" -c 'import networkx, pyroute2, pydantic' >/dev/null 2>&1; then
+        ok "controller imports (networkx, pyroute2, pydantic)"
     else
         fail "cannot import the controller dependencies from ${VENV} (run: make setup)"
     fi

@@ -203,6 +203,10 @@ class SaltController:
         self._last = result
         return result
 
+    def close(self) -> None:
+        with self._lock:
+            self._southbound.close()
+
     def status(self) -> dict[str, Any]:
         with self._lock:
             return {
