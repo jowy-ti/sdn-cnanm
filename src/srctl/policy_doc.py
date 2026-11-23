@@ -8,8 +8,8 @@ forms are accepted, but not mixed in the same entry:
     the controller computes the segment list.
 
 ``node`` / ``to`` / ``through``
-    The topology-style form.  ``through`` is installed verbatim as the explicit
-    segment list.
+    The explicit form for policy documents (topology files use ``via``
+    instead).  ``through`` is installed verbatim as the explicit segment list.
 
 The per-entry schema and validation are Pydantic models; this module converts
 them to the transport-free ``PolicySpec`` dataclass.

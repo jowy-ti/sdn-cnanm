@@ -21,6 +21,6 @@ While the lab runs, drive the SRv6 controller without `make`:
 All tooling runs from the project-local `.venv` created by `scripts/setup.sh`.
 
 - **Developer guide**: `AGENTS.md`
-- **Controller CLI guide**: `docs/SRCTL.md`
+- **Controller CLI**: `./scripts/srctl.sh --help`
 - **Lab runbook**: pending (the previous version was removed)
 - **VM setup**: `docs/ubuntu-22.04-vm-setup.md`, `docs/ubuntu2204-vm-operations.md`

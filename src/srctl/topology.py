@@ -191,12 +191,34 @@ class TopologyView:
     # -- computation ------------------------------------------------------- #
 
     def segments_for(self, destination: str, via: Sequence[str]) -> tuple[str, ...]:
-        """Build a forwarding-order segment list for an API-created intent."""
-        terminal = self.terminal_sid(destination)
-        segments: list[str] = [self.resolve_via(item).address for item in via]
+        """Build a forwarding-order segment list for a policy intent.
+
+        ``via`` entries are router names or SID literals.  The destination's
+        terminal SID is appended unless the last entry already is that terminal:
+        this lets an explicit terminal SID disambiguate a destination that has
+        more than one ``end.dx6`` SID.
+        """
+        resolved = [self.resolve_via(item) for item in via]
+        segments = [sid.address for sid in resolved]
+        terminal = self._terminal_from_last(resolved, destination)
+        if terminal is None:
+            terminal = self.terminal_sid(destination)
         if not segments or segments[-1] != terminal.address:
             segments.append(terminal.address)
         return tuple(segments)
+
+    def _terminal_from_last(
+        self, resolved: Sequence[SidEntry], destination: str
+    ) -> SidEntry | None:
+        """Return the last ``via`` SID if it already delivers to ``destination``."""
+        if not resolved:
+            return None
+        last = resolved[-1]
+        if last.behavior == "end.dx6" and last.to == destination:
+            return last
+        if last.behavior == "end" and last.owner == destination:
+            return last
+        return None
 
     def path(
         self,

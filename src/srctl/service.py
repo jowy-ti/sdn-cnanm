@@ -69,9 +69,11 @@ class SaltController:
         return loaded
 
     def _from_yaml(self, policy_id: str, raw: Any) -> PolicyIntent:
-        segments = tuple(canonical_sid(str(segment))[0] for segment in raw.through)
-        if not segments:
-            raise ControllerError(f"policy {policy_id}: empty segment list")
+        # The topology baseline uses the same friendly form as a policy
+        # document: router names or SID literals in ``via``, with the
+        # destination's terminal SID appended by the controller.
+        via = tuple(str(item) for item in raw.via)
+        segments = self.view.segments_for(str(raw.to), via)
         policy = PolicyIntent(
             id=policy_id,
             ingress=str(raw.node),

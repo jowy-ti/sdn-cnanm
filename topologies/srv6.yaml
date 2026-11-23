@@ -3,11 +3,11 @@
 #   hosts:    [ {name, use_v4?, use_v6?} ]
 #   routers:  [ {name, use_v4?, use_v6?, loopback?, ospf6?, sids?: [{address, behavior?, to?, cost?}]} ]
 #   links:    [ [a, b] | {nodes: [a, b], options?: {...}} ]
-#   policies: [ {node, to, through: [...], mode?, cost?} ]
+#   policies: [ {node, to, via: [...], mode?, cost?} ]
 #
 # use_v4 defaults to false: this lab is IPv6-only, so no IPv4 addresses or
-# OSPFv2 daemon are configured.  policies[].through is installed verbatim by
-# the controller as the SRv6 segment list.
+# OSPFv2 daemon are configured.  policies[].via lists waypoints (router names
+# or SID literals); the controller appends the destination's terminal SID.
 
 hosts:
   - name: h1
@@ -54,10 +54,10 @@ links:
 policies:
   - node: s1
     to: h2
-    through: [2001:db8:4::10, 2001:db8:6::10] # Enforces path s4 -> s6 -> h2
+    via: [s4] # Enforces path s4 -> s6 -> h2
     mode: encap
 
   - node: s6
     to: h1
-    through: [2001:db8:4::10, 2001:db8:1::10] # Enforces path s4 -> s1 -> h1
+    via: [s4] # Enforces path s4 -> s1 -> h1
     mode: encap

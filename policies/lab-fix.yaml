@@ -1,0 +1,16 @@
+# Reference repair document for topologies/srv6_lab.yaml.
+#
+# `srctl apply -f policies/lab-fix.yaml` shadows the two faulty baseline
+# policies of topologies/srv6_lab.yaml: the controller recomputes the segment
+# lists from the live SID catalog (via s4 plus the destination's terminal SID)
+# and replaces the encap routes on s1 and s6.
+policies:
+  - id: lab-h1-to-h2-via-s4
+    ingress: s1
+    destination: h2
+    via: [s4]
+
+  - id: lab-h2-to-h1-via-s4
+    ingress: s6
+    destination: h1
+    via: [s4]

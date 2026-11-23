@@ -28,7 +28,7 @@ make deps                 # reinstall requirements-dev.txt into .venv
 
 See `docs/ubuntu-22.04-vm-setup.md` (recipe), `docs/ubuntu-22.04-vm-setup-notes.md` (deviations observed on this host) and `docs/ubuntu2204-vm-operations.md` (day-to-day VM operations) for VM setup. `scripts/testbed-creation.sh` stages the minimal runtime set on the host, copies it into the `ubuntu2204` VM and runs `make setup` / `make doctor` inside the guest. Verify locally with `make check` and `make test` (and `make doctor` for the machine).
 
-`make check` validates exactly one file — the default `topologies/srv6.yaml`. It does not discover or check the other YAML files: `topologies/srv6_big.yaml` is an experimental topology that no make target covers, so validate it explicitly with `.venv/bin/python src/net_topology_yaml.py --check topologies/srv6_big.yaml` (no root, no network).
+`make check` validates exactly one file — the default `topologies/srv6.yaml`. It does not discover or check the other YAML files: `topologies/srv6_big.yaml` is an experimental topology that no make target covers, so validate it explicitly with `.venv/bin/python src/net_topology_yaml.py --check topologies/srv6_big.yaml` (no root, no network). The same applies to `topologies/srv6_lab.yaml`, the practice topology (its corrected baseline is active and the faulty pair is commented at the bottom).
 
 `docs/RUNBOOK.md` does not exist right now: the previous version was removed and a new one will be written later. Do not recreate it, and do not treat the removed content as current, unless explicitly asked; until the new file exists, this file (`AGENTS.md`) is the source of developer guidance.
 
@@ -73,13 +73,13 @@ Design notes for whichever scope is being implemented:
 
 Operating model:
 
-- The YAML topology `policies[].through` list is the **baseline** and is installed verbatim (`yaml-1`, `yaml-2`, ...). It is never recomputed.
+- The YAML topology `policies[].via` list is the **baseline** (`yaml-1`, `yaml-2`, ...). It is resolved once at load into `via SIDs + the destination's terminal SID` and installed; it is not recomputed at runtime. Topology policies only accept `via`; an explicit `through` list is only available in `srctl` policy documents.
 - A YAML/JSON policy document applied with `srctl apply` is an **overlay**. A file policy wins when it shares an `id` or an `(ingress, destination)` pair with a baseline policy; `apply --prune` removes only file-origin policies, so a shadowed baseline policy becomes active again.
 - In a document, `via` (router names or SID literals) is computed into `via SIDs + terminal SID`; `through` is installed verbatim. Both forms are accepted, but not mixed in one policy.
 - The whole document is parsed and validated before anything changes. `srctl diff` runs the same validation and prints the planned `add`/`replace`/`delete`/`noop` actions without touching the data plane.
 - `post_build()` no longer installs encapsulation routes; it only installs local SIDs and calls `enable_srv6()`. The controller is the sole owner of `encap seg6` policies.
 - Routes are installed with `ip -6 route replace <prefix> encap seg6 mode <mode> segs <list> metric <cost> dev <dev>`, where `<dev>` comes from `ip -6 route get <first SID>` (not ipmininet's first-interface heuristic). Deletion matches the exact prefix/segments/mode/metric/dev, so the OSPF route for the same prefix is preserved.
-- The controller listens on a per-user Unix socket (`/tmp/srctl-<uid>.sock`, `$SRCTL_SOCKET` overrides). There is no network port; `make run` needs no extra argv, so the existing sudoers rule keeps matching.
+- The controller listens on a per-user Unix socket (`/tmp/srctl-<uid>.sock`, `$SRCTL_SOCKET` overrides). There is no network port; `make run` needs no extra argv by default (use `make run ARGS=<topology>` to pick another YAML file), so the existing sudoers rule keeps matching.
 
 Policy document example (`policies/*.yaml`, JSON also accepted):
 
@@ -112,7 +112,7 @@ make smoke                                 # live end-to-end driver (root)
 
 `scripts/srctl.sh` is a thin wrapper that runs `python -m srctl.cli` with `PYTHONPATH=src` and the repo `.venv`; `make srctl ARGS="..."` is the equivalent make target. Neither needs `sudo`; only `make run` / `make smoke` do.
 
-See `docs/SRCTL.md` for the full controller CLI guide. `scripts/controller-smoke.txt` is the Mininet driver behind `make smoke`: it waits for OSPFv3, lists/validates/applies/prunes `policies/smoke.yaml`, checks the ingress routes and pings h1→h2.
+Run `./scripts/srctl.sh --help` for the CLI surface. `scripts/controller-smoke.txt` is the Mininet driver behind `make smoke`: it waits for OSPFv3, lists/validates/applies/prunes `policies/smoke.yaml`, checks the ingress routes and pings h1→h2.
 
 IPv4 is intentionally absent: `use_v4` defaults to false in the YAML schema and is passed to both routers and hosts, so `YamlRouterConfig` registers only OSPFv6 (zebra comes in as its dependency). Setting `use_v4: true` on a node restores OSPFv2/IPv4 for that node.
 
@@ -151,7 +151,7 @@ IPv4 is intentionally absent: `use_v4` defaults to false in the YAML schema and 
 
 ## Runtime gotchas
 
-- Running a topology needs root: `make run` runs `sudo <repo>/.venv/bin/python <repo>/src/net_topology_yaml.py` (absolute paths, no `-E`: a matching `NOPASSWD` line in `/etc/sudoers.d/net_topology` lets it run passwordless; `-E` would require a `SETENV` sudoers tag). The rule must be a single command line (`python` *and* the script) and it matches the exact argv, so any extra argument (e.g. `--check`) needs a password — run `--check` without sudo via `make check`. `scripts/setup.sh` generates the rule for the current checkout.
+- Running a topology needs root: `make run` runs `sudo <repo>/.venv/bin/python <repo>/src/net_topology_yaml.py` (absolute paths, no `-E`: a matching `NOPASSWD` line in `/etc/sudoers.d/net_topology` lets it run passwordless; `-E` would require a `SETENV` sudoers tag). The rule must be a single command line (`python` *and* the script) and it matches the exact argv, so any extra argument needs a password: `make run ARGS="topologies/srv6_lab.yaml"` selects another topology but prompts on a host whose rule covers only the argument-free command. `make check` never needs root (`make check ARGS=<topology>` validates another file). `scripts/setup.sh` generates the rule for the current checkout.
 - FRR must be installed system-wide (`apt-get install frr` / `dnf install frr`). The daemons live in `/usr/lib/frr` on Debian/Ubuntu and `/usr/libexec/frr` on Fedora/RHEL, neither of which is on PATH; the entrypoint probes both (plus `/usr/local/lib/frr`) and prepends the one that contains `zebra`/`ospfd`/`ospf6d` — ipmininet does `require_cmd("zebra"/"ospfd"/"ospf6d")` on PATH and fails at `net.start()` otherwise. Run `sudo systemctl disable --now frr` if the system FRR service is running (the topology starts its own instances).
 - One-time host setup: `sudo usermod -aG frrvty root`. ipmininet validates daemon configs with `-Cf ... -u root` and FRR aborts with `user(root) is not part of vty group specified(frrvty)` when root is not in that group (Debian/Ubuntu's `frr.postinst` only adds the `frr` user; Fedora's `frrvty` group only contains `frr`), killing every router at `net.start()`.
 - The FRR vty socket directory is `/run/frr` (`/var/run/frr`) on both Debian/Ubuntu and Fedora, so ipmininet's private tmpfs mount and its `vtysh` commands work unchanged.

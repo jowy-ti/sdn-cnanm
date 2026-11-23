@@ -23,11 +23,13 @@ Schema
     ``[a, b]`` or ``{nodes: [a, b], options: {...}}``; ``options`` is passed
     verbatim to ``IPTopo.addLink``.
 ``policies``
-    ``{node, to, through, mode?, cost?}``.  ``node`` is the ingress router,
-    ``to`` a destination node and ``through`` a non-empty list of IPv6 SIDs
-    (list transit SIDs before the egress SID); ``mode`` is ``encap`` (default)
-    or ``inline``.  ``through`` is installed verbatim as the segment list by
-    the controller; it is never recomputed.
+    ``{node, to, via, mode?, cost?}``.  ``node`` is the ingress router,
+    ``to`` a destination node and ``via`` a non-empty list of waypoints: router
+    names (each must own exactly one ``end`` SID) or IPv6 SID literals defined
+    in the topology.  The controller computes the segment list as the ``via``
+    SIDs followed by the destination's terminal SID; ``mode`` is ``encap``
+    (default) or ``inline``.  Explicit segment lists are only accepted in
+    ``srctl`` policy documents (the ``through`` key), not in the topology.
 
 The lab installs local SIDs during ``post_build()``; ingress encapsulation
 policies are owned by the in-process SRv6 controller (``src/srctl``), which
@@ -45,7 +47,7 @@ import os
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from ipaddress import IPv6Address, IPv6Network
+from ipaddress import IPv6Network
 from pathlib import Path
 from typing import Any, cast
 
@@ -152,7 +154,7 @@ class Link:
 class Policy:
     node: str
     to: str
-    through: tuple[str, ...]
+    via: tuple[str, ...]
     mode: str = "encap"
     cost: int = 1
 
@@ -311,12 +313,17 @@ def _parse_link(raw: Any, where: str) -> Link:
 
 def _parse_policy(raw: Any, where: str) -> Policy:
     mapping = _as_mapping(raw, where)
-    through = _as_sequence(mapping.get("through"), f"{where}.through")
-    if not through:
-        raise TopologyError(f"{where}.through: at least one segment is required")
-    segments = tuple(
-        _as_str(segment, f"{where}.through[{index}]")
-        for index, segment in enumerate(through)
+    if "through" in mapping:
+        raise TopologyError(
+            f"{where}.through: topology policies use 'via' (router names or "
+            "SID literals); 'through' is only accepted in srctl policy documents"
+        )
+    via = _as_sequence(mapping.get("via"), f"{where}.via")
+    if not via:
+        raise TopologyError(f"{where}.via: at least one waypoint is required")
+    waypoints = tuple(
+        _as_str(item, f"{where}.via[{index}]")
+        for index, item in enumerate(via)
     )
     mode = _opt_str_field(mapping, "mode", where) or "encap"
     if mode not in _SRV6_MODES:
@@ -326,7 +333,7 @@ def _parse_policy(raw: Any, where: str) -> Policy:
     return Policy(
         node=_str_field(mapping, "node", where),
         to=_str_field(mapping, "to", where),
-        through=segments,
+        via=waypoints,
         mode=mode,
         cost=_int_field(mapping, "cost", where, 1),
     )
@@ -389,6 +396,12 @@ def _validate(topology: Topology) -> None:
                     f"loopback locator {router.loopback}"
                 )
 
+    sid_addresses = {
+        IPv6Network(sid.address).network_address
+        for router in topology.routers
+        for sid in router.sids
+    }
+
     for policy in topology.policies:
         source = routers.get(policy.node)
         if source is None:
@@ -407,19 +420,41 @@ def _validate(topology: Topology) -> None:
                 f"policy on {policy.node!r}: destination {policy.to!r} has "
                 "'use_v6: false'"
             )
-        for segment in policy.through:
-            if segment in nodes:
+        for index, waypoint in enumerate(policy.via):
+            if waypoint in routers:
+                ends = [
+                    sid
+                    for sid in routers[waypoint].sids
+                    if sid.behavior == "end"
+                ]
+                if len(ends) != 1:
+                    raise TopologyError(
+                        f"policy on {policy.node!r}: via[{index}] {waypoint!r} "
+                        "is a router without exactly one 'end' SID"
+                    )
+                continue
+            if waypoint in nodes:
                 raise TopologyError(
-                    f"policy on {policy.node!r}: segment {segment!r} is a node "
-                    "name; use the IPv6 address of a local SID"
+                    f"policy on {policy.node!r}: via[{index}] {waypoint!r} is "
+                    "a host; hosts cannot be used as SRv6 waypoints"
                 )
             try:
-                IPv6Address(segment)
+                prefix = IPv6Network(waypoint)
             except ValueError as exc:
                 raise TopologyError(
-                    f"policy on {policy.node!r}: segment {segment!r} is not a "
-                    "valid IPv6 address"
+                    f"policy on {policy.node!r}: via[{index}] {waypoint!r} is "
+                    "neither a router name nor an IPv6 SID"
                 ) from exc
+            if prefix.prefixlen != 128:
+                raise TopologyError(
+                    f"policy on {policy.node!r}: via[{index}] SID "
+                    f"{waypoint!r} must be a /128 prefix"
+                )
+            if prefix.network_address not in sid_addresses:
+                raise TopologyError(
+                    f"policy on {policy.node!r}: via[{index}] SID "
+                    f"{waypoint!r} is not defined in the topology"
+                )
 
 
 def load_topology(path: Path) -> Topology:

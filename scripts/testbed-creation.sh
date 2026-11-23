@@ -19,8 +19,9 @@ VM_PATH="~/${REMOTE_DIR}"
 # ubuntu2204-vm-operations.md); the default URI is qemu:///session.
 export LIBVIRT_DEFAULT_URI=${LIBVIRT_DEFAULT_URI:-qemu:///system}
 
-# Stage the minimal runtime set (no dev tooling, no other topologies) in a
-# destination directory.  Preserves whatever the destination already holds.
+# Stage the minimal runtime set (all topologies and policy documents, no dev
+# tooling) in a destination directory.  Preserves whatever the destination
+# already holds.
 export_minimal_lab() {
     local dest=$1
     local src_root
@@ -40,7 +41,7 @@ export_minimal_lab() {
     mkdir -p "${dest}/src/srctl"
     cp "${src_root}"/src/srctl/*.py "${dest}/src/srctl/"
     cp "${src_root}/src/templates/ospf6d.mako" "${dest}/src/templates/"
-    cp "${src_root}/topologies/srv6.yaml" "${dest}/topologies/"
+    cp "${src_root}"/topologies/*.yaml "${dest}/topologies/"
     cp "${src_root}"/policies/*.yaml "${dest}/policies/"
 
     # Vendor wheel
@@ -52,17 +53,19 @@ export_minimal_lab() {
         shopt -u nullglob
     fi
 
-    # Scripts (setup + doctor + controller smoke driver)
+    # Scripts (setup + doctor + controller CLI + controller smoke driver)
     cp "${src_root}/scripts/setup.sh" "${dest}/scripts/"
     cp "${src_root}/scripts/doctor.sh" "${dest}/scripts/"
+    cp "${src_root}/scripts/srctl.sh" "${dest}/scripts/"
     cp "${src_root}/scripts/controller-smoke.txt" "${dest}/scripts/"
 
     # Makefile + requirements
     cp "${src_root}/Makefile" "${dest}/"
     cp "${src_root}/requirements.txt" "${dest}/"
 
-    # Ensure setup.sh is executable
-    chmod +x "${dest}/scripts/setup.sh" "${dest}/scripts/doctor.sh" 2>/dev/null || true
+    # Ensure the lab scripts are executable
+    chmod +x "${dest}/scripts/setup.sh" "${dest}/scripts/doctor.sh" \
+        "${dest}/scripts/srctl.sh" 2>/dev/null || true
 
     echo ""
     echo "==> Done. Copied to ${dest}"

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from net_topology_yaml import load_topology
 from srctl.models import ControllerError
 from srctl.topology import TopologyView
 
@@ -51,3 +54,21 @@ def test_unknown_waypoint_fails(view: TopologyView) -> None:
         view.segments_for("h2", ["nope"])
     with pytest.raises(ControllerError):
         view.path("s1", "h2", via=["r2"])  # no end SID
+
+
+def test_explicit_terminal_sid_disambiguates() -> None:
+    root = Path(__file__).resolve().parents[1]
+    big = TopologyView.from_topology(
+        load_topology(root / "topologies" / "srv6_big.yaml")
+    )
+    # h1 has two end.dx6 SIDs (ing1 and ing2), so terminal_sid is ambiguous.
+    with pytest.raises(ControllerError):
+        big.terminal_sid("h1")
+    assert big.segments_for("h1", ["msrv", "2001:db8:1::10"]) == (
+        "2001:db8:7::10",
+        "2001:db8:1::10",
+    )
+    assert big.segments_for("h2", ["msrv"]) == (
+        "2001:db8:7::10",
+        "2001:db8:18::10",
+    )
