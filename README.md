@@ -22,5 +22,6 @@ All tooling runs from the project-local `.venv` created by `scripts/setup.sh`.
 
 - **Developer guide**: `AGENTS.md`
 - **Controller CLI**: `./scripts/srctl.sh --help`
+- **SRv6 lab session (LaTeX/PDF)**: `lab_session/SRv6_Lab.tex`, `lab_session/SRv6_Lab.pdf`
 - **Lab runbook**: pending (the previous version was removed)
 - **VM setup**: `docs/ubuntu-22.04-vm-setup.md`, `docs/ubuntu2204-vm-operations.md`

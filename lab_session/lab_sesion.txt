@@ -1,0 +1,19 @@
+In this lab we are going to work with SRv6.
+
+We will use srv6_lab1.yaml as the initial topology that it will be evolving as the lab progress.
+
+Some advices:
+Routers can be named with r#number, hosts h#number, SRv6 routers sr#number
+
+In order to assign an IPv6 addresses you can follow the nomneclature: 2001:db8:(#router_number)::1/64
+We will use loopback always.
+Links between nodes are bidirectional.
+
+This are the steps to follow the lab:
+
+
+1. Does the initial topology provide connectivity between h1 and h2? Add a router (r4) linked to r2 and r5 and now try ping between h1 and h2.  Does the traffic goes through every router?
+
+2. We want to upgrade routers r1 and r5 to configure SRv6 policies. We want sr1 to be ingress and sr2 to be egress routers. Add r6 and r7 routers that connect r1 to h2 and r5 to h1. Do the traffic goes through the shortest path when h1 -> h2 and h2 -> h1? Why? Which routers are unusued? Now make sr1 and sr2 both ingress and egress routers, what changes in traffic flow (h1 -> h2 and h2 -> h1)?. Now add a router r8 connecting h1 and h2 directly, which path is the traffic following for h1 -> h2 and h2 -> h1?
+
+3. We want to add a router r9 linked to r3 and r4, how can we make the traffic pass through r3?

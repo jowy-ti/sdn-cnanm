@@ -1,0 +1,28 @@
+# For practice:
+# Have a simple network with ingress and egress so s4 -> r4. Optionaly a router is missing
+# They have to fill the SID tables of ingress and egress routers.
+# They have to create a middle SRv6 router to enforce route.
+# Finally a more complicated scenario
+
+hosts:
+  - name: h1
+  - name: h2
+
+routers:
+  - name: r1                     
+    loopback: 2001:db8:1::1/64
+
+  - name: r2                 
+    loopback: 2001:db8:2::1/64
+
+  - name: r3                    
+    loopback: 2001:db8:3::1/64
+
+  - name: r5                    
+    loopback: 2001:db8:5::1/64
+
+links:
+  - [h1, r1]
+  - [r1, r2]
+  - [r2, r3]
+  - [r5, h2]
